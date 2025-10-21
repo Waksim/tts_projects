@@ -43,7 +43,9 @@ TTS_PITCH = "+0Hz"
 
 # Авторизация
 INVITE_CODE = os.getenv("WEB_INVITE_CODE", "tts2025secret")  # Пригласительный код
+
 AUTH_COOKIE_NAME = "tts_auth_token"
+
 # Генерируем секретный токен для авторизованных пользователей
 AUTH_TOKEN = hashlib.sha256(INVITE_CODE.encode()).hexdigest()
 

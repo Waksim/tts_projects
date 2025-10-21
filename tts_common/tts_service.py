@@ -6,7 +6,7 @@ TTS Service - основная логика синтеза речи
 import asyncio
 import os
 import time
-from typing import List
+from typing import List, Callable, Optional, Awaitable
 
 import edge_tts
 
@@ -159,6 +159,7 @@ async def synthesize_text(
     from .text_utils import split_text_into_chunks
 
     start_time = time.monotonic()
+    char_count = len(text)
     print(f"Начинаю синтез для файла: {os.path.basename(output_path)}")
 
     output_dir = os.path.dirname(output_path)
@@ -178,7 +179,9 @@ async def synthesize_text(
             success = await _synthesize_single_chunk(chunks[0], output_path, voice, rate, pitch)
 
         duration = time.monotonic() - start_time
-        print(f"Синтез завершен за {duration:.2f} с. Статус: {'Успех' if success else 'Провал'}")
+        speed = char_count / duration if duration > 0 else 0
+        print(f"📊 Озвучено {char_count} символов за {duration:.2f}с (скорость: {speed:.0f} симв/с)")
+        print(f"Синтез завершен. Статус: {'Успех' if success else 'Провал'}")
         return success
 
     # Множество чанков - создаем части и сшиваем
@@ -227,8 +230,10 @@ async def synthesize_text(
     final_success = await _merge_mp3_parts(created_parts, output_path)
 
     duration = time.monotonic() - start_time
+    speed = char_count / duration if duration > 0 else 0
     status_msg = 'Успех' if final_success else 'Провал'
-    print(f"Синтез завершен за {duration:.2f} с. Статус: {status_msg}")
+    print(f"📊 Озвучено {char_count} символов за {duration:.2f}с (скорость: {speed:.0f} симв/с)")
+    print(f"Синтез завершен. Статус: {status_msg}")
 
     return final_success
 
@@ -258,7 +263,8 @@ async def synthesize_text_with_duration_limit(
     voice: str = VOICE,
     rate: str = DEFAULT_RATE,
     pitch: str = DEFAULT_PITCH,
-    chunk_limit: int = CHUNK_CHAR_LIMIT
+    chunk_limit: int = CHUNK_CHAR_LIMIT,
+    on_part_ready: Optional[Callable[[int, str, int], Awaitable[None]]] = None
 ) -> List[str]:
     """
     Синтезирует текст с учетом максимальной длительности одного файла.
@@ -272,13 +278,18 @@ async def synthesize_text_with_duration_limit(
         rate: Скорость речи
         pitch: Высота тона
         chunk_limit: Максимальный размер одного чанка в символах
+        on_part_ready: Опциональный callback, вызывается когда часть готова.
+                       Принимает (part_number, file_path, total_parts)
 
     Returns:
         Список путей к созданным MP3 файлам (пустой список если синтез не удался)
     """
     from .duration_utils import split_text_by_duration, estimate_duration_minutes
 
+    start_time = time.monotonic()
+    char_count = len(text)
     print(f"Начинаю синтез с лимитом длительности: {max_duration_minutes} мин" if max_duration_minutes else "Начинаю синтез без лимита длительности")
+    print(f"Общее количество символов: {char_count}")
 
     # Разбиваем текст по лимиту длительности
     text_parts = split_text_by_duration(text, max_duration_minutes)
@@ -299,6 +310,9 @@ async def synthesize_text_with_duration_limit(
             pitch,
             chunk_limit
         )
+        duration = time.monotonic() - start_time
+        speed = char_count / duration if duration > 0 else 0
+        print(f"📊 Итого озвучено {char_count} символов за {duration:.2f}с (скорость: {speed:.0f} симв/с)")
         return [output_base_path] if success else []
 
     # Если несколько частей, создаем файлы с суффиксами _part_N
@@ -306,6 +320,7 @@ async def synthesize_text_with_duration_limit(
     base_name = os.path.basename(output_base_path)
     name_without_ext = os.path.splitext(base_name)[0]
 
+    total_parts = len(text_parts)
     created_files = []
     tasks = []
 
@@ -313,8 +328,8 @@ async def synthesize_text_with_duration_limit(
         part_filename = f"{name_without_ext}_part_{i}.mp3"
         part_path = os.path.join(output_dir, part_filename)
 
-        # Добавляем задачу на синтез
-        async def synthesize_part(text_content, file_path):
+        # Добавляем задачу на синтез с уведомлением о готовности
+        async def synthesize_part(part_num, text_content, file_path):
             success = await synthesize_text(
                 text_content,
                 file_path,
@@ -323,21 +338,31 @@ async def synthesize_text_with_duration_limit(
                 pitch,
                 chunk_limit
             )
-            return (file_path, success)
+            # Вызываем callback если часть готова и callback задан
+            if success and on_part_ready:
+                await on_part_ready(part_num, file_path, total_parts)
+            return (part_num, file_path, success)
 
-        tasks.append(synthesize_part(part_text, part_path))
+        tasks.append(synthesize_part(i, part_text, part_path))
 
     # Запускаем все задачи параллельно
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Собираем успешно созданные файлы
+    # Собираем успешно созданные файлы в правильном порядке
+    results_dict = {}
     for result in results:
         if isinstance(result, Exception):
             print(f"❌ Ошибка при синтезе части: {result}")
-        elif result[1]:  # success == True
-            created_files.append(result[0])
+        elif result[2]:  # success == True
+            part_num, file_path, _ = result
+            results_dict[part_num] = file_path
         else:
-            print(f"❌ Не удалось синтезировать часть: {result[0]}")
+            print(f"❌ Не удалось синтезировать часть: {result[1]}")
+
+    # Собираем файлы в правильном порядке по номерам частей
+    for i in range(1, total_parts + 1):
+        if i in results_dict:
+            created_files.append(results_dict[i])
 
     # Если не все части созданы успешно, удаляем все
     if len(created_files) != len(text_parts):
@@ -350,5 +375,8 @@ async def synthesize_text_with_duration_limit(
                     pass
         return []
 
+    duration = time.monotonic() - start_time
+    speed = char_count / duration if duration > 0 else 0
+    print(f"📊 Итого озвучено {char_count} символов за {duration:.2f}с (скорость: {speed:.0f} симв/с)")
     print(f"✅ Успешно создано {len(created_files)} аудио файлов")
     return created_files

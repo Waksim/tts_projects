@@ -41,6 +41,10 @@ def get_main_menu_keyboard(user_id: int) -> InlineKeyboardMarkup:
     ])
 
     keyboard.append([
+        InlineKeyboardButton(text="⚡ Скорость речи", callback_data="select_rate")
+    ])
+
+    keyboard.append([
         InlineKeyboardButton(text="⏱ Длительность аудио", callback_data="select_duration")
     ])
 
@@ -220,6 +224,32 @@ def get_duration_selection_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(
                 text=duration_label,
                 callback_data=f"set_duration:{callback_value}"
+            )
+        ])
+
+    # Кнопка "Назад"
+    keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main")])
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_rate_selection_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает клавиатуру для выбора скорости речи.
+
+    Returns:
+        InlineKeyboardMarkup с кнопками выбора скорости
+    """
+    from config import AVAILABLE_RATES
+
+    keyboard = []
+
+    # Кнопки для каждого варианта скорости
+    for rate_value, rate_label in AVAILABLE_RATES.items():
+        keyboard.append([
+            InlineKeyboardButton(
+                text=rate_label,
+                callback_data=f"set_rate:{rate_value}"
             )
         ])
 

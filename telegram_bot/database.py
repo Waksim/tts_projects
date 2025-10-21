@@ -277,6 +277,65 @@ async def set_user_voice(user_id: int, voice_name: str):
         await session.commit()
 
 
+async def get_user_rate(user_id: int) -> str:
+    """
+    Возвращает настройку скорости речи пользователя.
+
+    Args:
+        user_id: ID пользователя
+
+    Returns:
+        Скорость речи (например, "+50%") или дефолтное значение
+    """
+    from models import UserSettings
+    from sqlalchemy import select
+    from config import TTS_RATE
+
+    async with async_session_factory() as session:
+        stmt = select(UserSettings).where(UserSettings.user_id == user_id)
+        result = await session.execute(stmt)
+        settings = result.scalar_one_or_none()
+
+        if settings:
+            return settings.speech_rate
+        else:
+            # Возвращаем дефолтную скорость из config
+            return TTS_RATE
+
+
+async def set_user_rate(user_id: int, speech_rate: str):
+    """
+    Сохраняет настройку скорости речи пользователя.
+
+    Args:
+        user_id: ID пользователя
+        speech_rate: Скорость речи (например, "+50%")
+    """
+    from models import UserSettings
+    from sqlalchemy import select
+    from datetime import datetime
+
+    async with async_session_factory() as session:
+        # Проверяем существование настроек
+        stmt = select(UserSettings).where(UserSettings.user_id == user_id)
+        result = await session.execute(stmt)
+        settings = result.scalar_one_or_none()
+
+        if settings:
+            # Обновляем существующие настройки
+            settings.speech_rate = speech_rate
+            settings.updated_at = datetime.utcnow()
+        else:
+            # Создаем новые настройки
+            settings = UserSettings(
+                user_id=user_id,
+                speech_rate=speech_rate
+            )
+            session.add(settings)
+
+        await session.commit()
+
+
 async def get_user_max_duration(user_id: int):
     """
     Возвращает настройку максимальной длительности аудио для пользователя.

@@ -146,9 +146,13 @@ class TelethonService:
             entity = await self.client.get_entity(username)
 
             messages = []
+            # Запрашиваем больше сообщений, чтобы учесть посты без текста (только изображения и т.д.)
+            # Увеличиваем лимит в 5 раз, но не более 100
+            fetch_limit = min(limit * 5, 100)
+
             async for message in self.client.iter_messages(
                 entity,
-                limit=limit,
+                limit=fetch_limit,
                 reverse=False,  # От новых к старым
                 min_id=min_id
             ):
@@ -156,6 +160,9 @@ class TelethonService:
                 text = self._extract_message_text(message)
                 if text:
                     messages.append((message.id, text))
+                    # Останавливаемся когда набрали нужное количество сообщений с текстом
+                    if len(messages) >= limit:
+                        break
 
             # Разворачиваем чтобы от старых к новым
             messages.reverse()
@@ -186,9 +193,13 @@ class TelethonService:
             entity = await self.client.get_entity(chat_id)
 
             messages = []
+            # Запрашиваем больше сообщений, чтобы учесть сообщения без текста (только изображения и т.д.)
+            # Увеличиваем лимит в 5 раз, но не более 100
+            fetch_limit = min(limit * 5, 100)
+
             async for message in self.client.iter_messages(
                 entity,
-                limit=limit,
+                limit=fetch_limit,
                 reverse=False,
                 min_id=min_id
             ):
@@ -196,6 +207,9 @@ class TelethonService:
                 text = self._extract_message_text(message)
                 if text:
                     messages.append((message.id, text))
+                    # Останавливаемся когда набрали нужное количество сообщений с текстом
+                    if len(messages) >= limit:
+                        break
 
             # Разворачиваем чтобы от старых к новым
             messages.reverse()

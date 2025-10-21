@@ -218,7 +218,7 @@ async def get_last_voiced_message_id(user_id: int, source_type: str, source_id: 
         return last_id if last_id else 0
 
 
-async def get_user_voice(user_id: int) -> tuple[str, str | None]:
+async def get_user_voice(user_id: int) -> str:
     """
     Возвращает настройки голоса пользователя.
 
@@ -226,7 +226,7 @@ async def get_user_voice(user_id: int) -> tuple[str, str | None]:
         user_id: ID пользователя
 
     Returns:
-        Кортеж (voice_name, voice_style) или дефолтные значения
+        Название голоса или дефолтное значение
     """
     from models import UserSettings
     from sqlalchemy import select
@@ -238,20 +238,19 @@ async def get_user_voice(user_id: int) -> tuple[str, str | None]:
         settings = result.scalar_one_or_none()
 
         if settings:
-            return (settings.voice_name, settings.voice_style)
+            return settings.voice_name
         else:
             # Возвращаем дефолтный голос из config
-            return (TTS_VOICE, None)
+            return TTS_VOICE
 
 
-async def set_user_voice(user_id: int, voice_name: str, voice_style: str = None):
+async def set_user_voice(user_id: int, voice_name: str):
     """
     Сохраняет настройки голоса пользователя.
 
     Args:
         user_id: ID пользователя
         voice_name: Название голоса (например, "ru-RU-DmitryNeural")
-        voice_style: Стиль голоса (например, "crisp" для Dariya) или None
     """
     from models import UserSettings
     from sqlalchemy import select
@@ -266,14 +265,12 @@ async def set_user_voice(user_id: int, voice_name: str, voice_style: str = None)
         if settings:
             # Обновляем существующие настройки
             settings.voice_name = voice_name
-            settings.voice_style = voice_style
             settings.updated_at = datetime.utcnow()
         else:
             # Создаем новые настройки
             settings = UserSettings(
                 user_id=user_id,
-                voice_name=voice_name,
-                voice_style=voice_style
+                voice_name=voice_name
             )
             session.add(settings)
 

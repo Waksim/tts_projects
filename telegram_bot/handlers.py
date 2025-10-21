@@ -48,8 +48,7 @@ from config import (
     MAX_FILE_SIZE_MB,
     MAX_STORAGE_MB,
     OWNER_ID,
-    AVAILABLE_VOICES,
-    VOICE_STYLES
+    AVAILABLE_VOICES
 )
 from database import (
     save_request,
@@ -70,8 +69,7 @@ from keyboards import (
     get_my_channels_keyboard,
     get_messages_count_keyboard,
     get_my_chats_keyboard,
-    get_voice_selection_keyboard,
-    get_dariya_style_keyboard
+    get_voice_selection_keyboard
 )
 from states import AddChannelStates, AddChatStates
 
@@ -118,17 +116,13 @@ async def show_main_menu(message: Message, edit: bool = False):
         await message.answer(text, reply_markup=markup, parse_mode="HTML")
 
 
-def get_voice_display_name(voice_name: str, voice_style: str | None) -> str:
+def get_voice_display_name(voice_name: str) -> str:
     """Формирует красивое отображение голоса для пользователя"""
     # Получаем базовое имя голоса
     if voice_name in AVAILABLE_VOICES:
         display_name = AVAILABLE_VOICES[voice_name]["name"]
     else:
         display_name = voice_name  # fallback на ID голоса
-
-    # Добавляем стиль если есть
-    if voice_style and voice_style in VOICE_STYLES:
-        display_name += f" ({VOICE_STYLES[voice_style]})"
 
     return display_name
 
@@ -139,8 +133,8 @@ async def cmd_help(message: Message):
     user_id = message.from_user.id
 
     # Получаем текущий голос пользователя
-    voice_name, voice_style = await get_user_voice(user_id)
-    voice_display = get_voice_display_name(voice_name, voice_style)
+    voice_name = await get_user_voice(user_id)
+    voice_display = get_voice_display_name(voice_name)
 
     help_text = f"""
 📖 <b>Помощь по использованию бота</b>
@@ -260,7 +254,7 @@ async def handle_document(message: Message):
         await message.bot.send_chat_action(message.chat.id, ChatAction.RECORD_VOICE)
 
         # Получаем персональные настройки голоса пользователя
-        voice_name, voice_style = await get_user_voice(user_id)
+        voice_name = await get_user_voice(user_id)
 
         # Генерируем имя файла из первых 7 слов текста
         audio_filename = generate_filename_from_text(text, user_id)
@@ -276,8 +270,7 @@ async def handle_document(message: Message):
             str(audio_path),
             voice=voice_name,
             rate=TTS_RATE,
-            pitch=TTS_PITCH,
-            style=voice_style
+            pitch=TTS_PITCH
         )
 
         if not success:
@@ -368,7 +361,7 @@ async def handle_url(message: Message, url: str, user_id: int, username: str):
         await message.bot.send_chat_action(message.chat.id, ChatAction.RECORD_VOICE)
 
         # Получаем персональные настройки голоса пользователя
-        voice_name, voice_style = await get_user_voice(user_id)
+        voice_name = await get_user_voice(user_id)
 
         # Генерируем имя файла из первых 7 слов извлеченного текста
         audio_filename = generate_filename_from_text(text, user_id)
@@ -384,8 +377,7 @@ async def handle_url(message: Message, url: str, user_id: int, username: str):
             str(audio_path),
             voice=voice_name,
             rate=TTS_RATE,
-            pitch=TTS_PITCH,
-            style=voice_style
+            pitch=TTS_PITCH
         )
 
         if not success:
@@ -449,7 +441,7 @@ async def handle_plain_text(message: Message, text: str, user_id: int, username:
         await message.bot.send_chat_action(message.chat.id, ChatAction.RECORD_VOICE)
 
         # Получаем персональные настройки голоса пользователя
-        voice_name, voice_style = await get_user_voice(user_id)
+        voice_name = await get_user_voice(user_id)
 
         # Синтезируем аудио - используем первые 7 слов для имени файла
         audio_filename = generate_filename_from_text(text, user_id)
@@ -465,8 +457,7 @@ async def handle_plain_text(message: Message, text: str, user_id: int, username:
             str(audio_path),
             voice=voice_name,
             rate=TTS_RATE,
-            pitch=TTS_PITCH,
-            style=voice_style
+            pitch=TTS_PITCH
         )
 
         if not success:
@@ -826,7 +817,7 @@ async def voice_messages(
             await status_msg.edit_text(f"🎤 Синтезирую {len(combined_text)} символов...")
 
         # Получаем персональные настройки голоса пользователя
-        voice_name, voice_style = await get_user_voice(user_id)
+        voice_name = await get_user_voice(user_id)
 
         # Генерируем имя файла из первого сообщения
         audio_filename = generate_filename_from_text(valid_messages[0][1], user_id)
@@ -842,8 +833,7 @@ async def voice_messages(
             str(audio_path),
             voice=voice_name,
             rate=TTS_RATE,
-            pitch=TTS_PITCH,
-            style=voice_style
+            pitch=TTS_PITCH
         )
 
         if not success:
@@ -983,8 +973,8 @@ async def callback_help(callback: CallbackQuery):
     user_id = callback.from_user.id
 
     # Получаем текущий голос пользователя
-    voice_name, voice_style = await get_user_voice(user_id)
-    voice_display = get_voice_display_name(voice_name, voice_style)
+    voice_name = await get_user_voice(user_id)
+    voice_display = get_voice_display_name(voice_name)
 
     help_text = f"""
 📖 <b>Помощь по использованию бота</b>
@@ -1578,51 +1568,11 @@ async def callback_set_voice(callback: CallbackQuery):
     voice_id = callback.data.split(":", 1)[1]
     user_id = callback.from_user.id
 
-    # Проверяем, нужно ли выбрать стиль для Дарии
-    if voice_id == "ru-RU-DariyaNeural":
-        # Показываем меню выбора стиля
-        text = "👩 <b>Голос Дарии</b>\n\nВыберите стиль голоса:"
-        keyboard = get_dariya_style_keyboard()
+    # Сохраняем голос
+    await set_user_voice(user_id, voice_id)
 
-        try:
-            await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
-        except TelegramBadRequest:
-            await callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
-    else:
-        # Сохраняем голос без стиля
-        await set_user_voice(user_id, voice_id, voice_style=None)
-
-        voice_name = AVAILABLE_VOICES[voice_id]["name"]
-        text = f"✅ <b>Голос сохранен!</b>\n\n🎤 {voice_name}"
-
-        try:
-            await callback.message.edit_text(
-                text,
-                parse_mode="HTML",
-                reply_markup=get_back_button_keyboard()
-            )
-        except TelegramBadRequest:
-            await callback.message.answer(
-                text,
-                parse_mode="HTML",
-                reply_markup=get_back_button_keyboard()
-            )
-
-
-@router.callback_query(F.data.startswith("set_voice_style:"))
-async def callback_set_voice_style(callback: CallbackQuery):
-    """Обрабатывает выбор стиля для голоса Дарии"""
-    await callback.answer()
-
-    # Парсим callback_data: set_voice_style:style_id
-    style_id = callback.data.split(":", 1)[1]
-    user_id = callback.from_user.id
-
-    # Сохраняем голос Дарии со стилем
-    await set_user_voice(user_id, "ru-RU-DariyaNeural", voice_style=style_id)
-
-    style_name = VOICE_STYLES[style_id]
-    text = f"✅ <b>Голос сохранен!</b>\n\n🎤 👩 Дария ({style_name})"
+    voice_name = AVAILABLE_VOICES[voice_id]["name"]
+    text = f"✅ <b>Голос сохранен!</b>\n\n🎤 {voice_name}"
 
     try:
         await callback.message.edit_text(

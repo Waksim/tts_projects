@@ -11,6 +11,7 @@ import secrets
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Optional
+from dotenv import load_dotenv
 
 from fastapi import FastAPI, Request, Form, HTTPException, UploadFile, File, Cookie, Response
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
@@ -20,6 +21,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 # Добавляем путь к tts_common
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Загружаем переменные окружения из .env файла
+load_dotenv()
 
 from tts_common import synthesize_text, StorageManager, parse_document
 from tts_common.document_parser import SUPPORTED_EXTENSIONS
@@ -38,7 +42,7 @@ DEFAULT_RATE = "+50%"
 TTS_PITCH = "+0Hz"
 
 # Авторизация
-INVITE_CODE = "tts2025secret"  # Пригласительный код
+INVITE_CODE = os.getenv("WEB_INVITE_CODE", "tts2025secret")  # Пригласительный код
 AUTH_COOKIE_NAME = "tts_auth_token"
 # Генерируем секретный токен для авторизованных пользователей
 AUTH_TOKEN = hashlib.sha256(INVITE_CODE.encode()).hexdigest()

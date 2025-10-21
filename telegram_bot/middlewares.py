@@ -10,7 +10,6 @@ from aiogram import BaseMiddleware
 from aiogram.types import Message, CallbackQuery
 
 from config import REQUIRED_CHANNEL_ID, REQUIRED_CHANNEL_USERNAME
-from keyboards import get_subscription_keyboard
 from telethon_service import get_telethon_service
 
 logger = logging.getLogger(__name__)
@@ -84,14 +83,11 @@ class SubscriptionCheckMiddleware(BaseMiddleware):
         """
         message_text = (
             "⛔️ <b>Доступ ограничен</b>\n\n"
-            f"Для использования бота необходимо подписаться на канал @{REQUIRED_CHANNEL_USERNAME}\n\n"
-            "После подписки нажмите кнопку <b>\"Я подписался\"</b>"
+            "Для использования бота напишите администратору @maksenro"
         )
 
-        keyboard = get_subscription_keyboard(REQUIRED_CHANNEL_USERNAME)
-
         if isinstance(event, Message):
-            await event.answer(message_text, reply_markup=keyboard, parse_mode="HTML")
+            await event.answer(message_text, parse_mode="HTML")
         elif isinstance(event, CallbackQuery):
             await event.answer("⛔️ Требуется подписка на канал!", show_alert=True)
-            await event.message.answer(message_text, reply_markup=keyboard, parse_mode="HTML")
+            await event.message.answer(message_text, parse_mode="HTML")

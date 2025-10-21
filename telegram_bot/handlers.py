@@ -260,7 +260,7 @@ async def handle_document(message: Message):
         await message.answer_audio(
             audio_file,
             title=file_name,
-            performer="TTS Bot"
+            performer="MKttsBOT"
         )
 
         # Удаляем сообщение о обработке
@@ -361,10 +361,12 @@ async def handle_url(message: Message, url: str, user_id: int, username: str):
         # Отправляем аудио
         await processing_msg.edit_text("📤 Отправляю аудио...")
         audio_file = FSInputFile(str(audio_path))
+        # Берем первые 7 слов для названия
+        web_title = ' '.join(text.split()[:7])
         await message.answer_audio(
             audio_file,
-            title="Web Article",
-            performer="TTS Bot"
+            title=web_title,
+            performer="MKttsBOT"
         )
 
         await processing_msg.delete()
@@ -435,10 +437,12 @@ async def handle_plain_text(message: Message, text: str, user_id: int, username:
 
         # Отправляем аудио
         audio_file = FSInputFile(str(audio_path))
+        # Берем первые 7 слов для названия (без расширения .mp3)
+        text_title = ' '.join(text.split()[:7])
         await message.answer_audio(
             audio_file,
-            title="Text Message",
-            performer="TTS Bot"
+            title=text_title,
+            performer="MKttsBOT"
         )
 
         # Удаляем сообщение о обработке
@@ -546,7 +550,8 @@ async def cmd_add_channel(message: Message):
             user_id,
             source_type='channel',
             source_id=channel_id,
-            status_msg=processing_msg
+            status_msg=processing_msg,
+            source_title=channel_title
         )
 
     except Exception as e:
@@ -630,7 +635,8 @@ async def cmd_add_chat(message: Message):
             user_id,
             source_type='chat',
             source_id=chat_id,
-            status_msg=processing_msg
+            status_msg=processing_msg,
+            source_title=chat_title
         )
 
     except Exception as e:
@@ -688,7 +694,8 @@ async def cmd_voice_new(message: Message):
                     user_id,
                     source_type='channel',
                     source_id=channel.channel_id,
-                    status_msg=None  # Не обновляем статус для каждого канала
+                    status_msg=None,  # Не обновляем статус для каждого канала
+                    source_title=channel.channel_title
                 )
 
                 total_new_messages += len(messages)
@@ -715,7 +722,8 @@ async def cmd_voice_new(message: Message):
                     user_id,
                     source_type='chat',
                     source_id=chat.chat_id,
-                    status_msg=None
+                    status_msg=None,
+                    source_title=chat.chat_title
                 )
 
                 total_new_messages += len(messages)
@@ -736,7 +744,8 @@ async def voice_messages(
     user_id: int,
     source_type: str,
     source_id: int,
-    status_msg: Message = None
+    status_msg: Message = None,
+    source_title: str = None
 ):
     """
     Озвучивает список сообщений как единый текст.
@@ -748,6 +757,7 @@ async def voice_messages(
         source_type: Тип источника ('channel' или 'chat')
         source_id: ID источника
         status_msg: Сообщение для обновления статуса
+        source_title: Название канала или чата (опционально)
     """
     if not messages:
         return
@@ -805,11 +815,21 @@ async def voice_messages(
             await status_msg.edit_text("📤 Отправляю аудио...")
 
         audio_file = FSInputFile(str(audio_path))
-        source_name = "Channel" if source_type == "channel" else "Chat"
+
+        # Формируем название аудио
+        if source_title:
+            # Очищаем название от недопустимых символов
+            clean_title = sanitize_filename(source_title).replace('.mp3', '')
+            audio_title = f"{clean_title} ({len(valid_messages)} messages)"
+        else:
+            # Fallback на старое поведение
+            source_name = "Channel" if source_type == "channel" else "Chat"
+            audio_title = f"{source_name} ({len(valid_messages)} messages)"
+
         await message.answer_audio(
             audio_file,
-            title=f"{source_name} ({len(valid_messages)} messages)",
-            performer="TTS Bot"
+            title=audio_title,
+            performer="MKttsBOT"
         )
 
         # Сохраняем в БД информацию о последнем озвученном сообщении
@@ -912,16 +932,6 @@ async def callback_back_to_main(callback: CallbackQuery, state: FSMContext):
 
     # Редактируем сообщение с главным меню
     await show_main_menu(callback.message, edit=True)
-
-
-@router.callback_query(F.data == "check_subscription")
-async def callback_check_subscription(callback: CallbackQuery):
-    """Проверка подписки на канал при повторном нажатии"""
-    await callback.answer("🔄 Проверяю подписку...", show_alert=False)
-
-    # Принудительно очищаем кэш middleware, просто отправляем главное меню
-    # Middleware автоматически проверит подписку при следующем действии
-    await show_main_menu(callback.message, edit=False)
 
 
 @router.callback_query(F.data == "help")
@@ -1134,7 +1144,8 @@ async def callback_voice_channel(callback: CallbackQuery):
             user_id,
             source_type='channel',
             source_id=channel_id,
-            status_msg=callback.message
+            status_msg=callback.message,
+            source_title=channel_title
         )
 
         # После озвучки возвращаемся в главное меню
@@ -1263,6 +1274,14 @@ async def callback_voice_chat(callback: CallbackQuery):
     try:
         telethon = await get_telethon_service()
 
+        # Получаем информацию о чате
+        chat_info = await telethon.get_chat_info(chat_id)
+        if not chat_info:
+            await callback.message.edit_text(f"❌ Не удалось получить информацию о чате")
+            return
+
+        _, chat_title, _ = chat_info
+
         # Получаем сообщения чата
         messages = await telethon.get_chat_messages(chat_id, limit=count)
 
@@ -1279,7 +1298,8 @@ async def callback_voice_chat(callback: CallbackQuery):
             user_id,
             source_type='chat',
             source_id=chat_id,
-            status_msg=callback.message
+            status_msg=callback.message,
+            source_title=chat_title
         )
 
         # После озвучки возвращаемся в главное меню
@@ -1433,7 +1453,8 @@ async def callback_voice_new(callback: CallbackQuery):
                     user_id,
                     source_type='channel',
                     source_id=channel.channel_id,
-                    status_msg=None
+                    status_msg=None,
+                    source_title=channel.channel_title
                 )
 
                 total_new_messages += len(messages)
@@ -1459,7 +1480,8 @@ async def callback_voice_new(callback: CallbackQuery):
                     user_id,
                     source_type='chat',
                     source_id=chat.chat_id,
-                    status_msg=None
+                    status_msg=None,
+                    source_title=chat.chat_title
                 )
 
                 total_new_messages += len(messages)

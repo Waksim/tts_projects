@@ -74,8 +74,6 @@ async def set_bot_commands(bot: Bot):
     # Команды для обычных пользователей
     user_commands = [
         BotCommand(command="menu", description="🎛 Главное меню"),
-        BotCommand(command="voice_new", description="🔊 Озвучить новое"),
-        BotCommand(command="my_channels", description="📢 Мои каналы"),
         BotCommand(command="help", description="📖 Помощь"),
         BotCommand(command="stats", description="📊 Статистика"),
     ]

@@ -28,12 +28,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tts_common import (
     synthesize_text,
+    synthesize_text_with_duration_limit,
     parse_document,
     parse_url,
     is_valid_url,
     StorageManager,
     sanitize_filename,
-    generate_filename_from_text
+    generate_filename_from_text,
+    estimate_duration_minutes,
+    format_duration_display,
+    calculate_parts_info
 )
 from tts_common.document_parser import SUPPORTED_EXTENSIONS
 
@@ -57,7 +61,9 @@ from database import (
     save_voiced_message,
     get_last_voiced_message_id,
     get_user_voice,
-    set_user_voice
+    set_user_voice,
+    get_user_max_duration,
+    set_user_max_duration
 )
 from telethon_service import get_telethon_service
 from keyboards import (
@@ -67,7 +73,8 @@ from keyboards import (
     get_my_channels_keyboard,
     get_messages_count_keyboard,
     get_my_chats_keyboard,
-    get_voice_selection_keyboard
+    get_voice_selection_keyboard,
+    get_duration_selection_keyboard
 )
 from states import AddChannelStates, AddChatStates
 
@@ -230,12 +237,23 @@ async def handle_document(message: Message):
         # Удаляем временный файл
         os.remove(temp_file_path)
 
-        # Синтезируем аудио
-        await processing_msg.edit_text("🎤 Синтезирую речь...")
-        await message.bot.send_chat_action(message.chat.id, ChatAction.RECORD_VOICE)
-
-        # Получаем персональные настройки голоса пользователя
+        # Получаем персональные настройки пользователя
         voice_name = await get_user_voice(user_id)
+        max_duration = await get_user_max_duration(user_id)
+
+        # Рассчитываем количество частей
+        parts_count, avg_duration = calculate_parts_info(text, max_duration)
+
+        if parts_count > 1:
+            duration_text = format_duration_display(avg_duration)
+            await processing_msg.edit_text(
+                f"🎤 Синтезирую речь...\n\n"
+                f"Текст будет разбит на {parts_count} частей (~{duration_text} каждая)"
+            )
+        else:
+            await processing_msg.edit_text("🎤 Синтезирую речь...")
+
+        await message.bot.send_chat_action(message.chat.id, ChatAction.RECORD_VOICE)
 
         # Генерируем имя файла из первых 7 слов текста
         audio_filename = generate_filename_from_text(text, user_id)
@@ -245,37 +263,50 @@ async def handle_document(message: Message):
         estimated_size = len(text) * 300  # Примерная оценка размера файла
         await storage_manager.ensure_space_available_async(estimated_size)
 
-        # Синтезируем
-        success = await synthesize_text(
+        # Синтезируем с учетом лимита длительности
+        audio_files = await synthesize_text_with_duration_limit(
             text,
             str(audio_path),
+            max_duration_minutes=max_duration,
             voice=voice_name,
             rate=TTS_RATE,
             pitch=TTS_PITCH
         )
 
-        if not success:
+        if not audio_files:
             raise Exception("Не удалось синтезировать аудио")
 
-        # Отправляем аудио пользователю
+        # Отправляем аудиофайлы пользователю
         await processing_msg.edit_text("📤 Отправляю аудио...")
-        audio_file = FSInputFile(str(audio_path))
-        await message.answer_audio(
-            audio_file,
-            title=file_name,
-            performer="MKttsBOT"
-        )
+
+        # Берем имя из имени документа (без расширения)
+        doc_name = os.path.splitext(file_name)[0]
+
+        for i, audio_file_path in enumerate(audio_files, start=1):
+            audio_file = FSInputFile(audio_file_path)
+
+            # Формируем название с номером части если файлов несколько
+            if len(audio_files) > 1:
+                title = f"{doc_name} - Часть {i}/{len(audio_files)}"
+            else:
+                title = file_name
+
+            await message.answer_audio(
+                audio_file,
+                title=title,
+                performer="MKttsBOT"
+            )
 
         # Удаляем сообщение о обработке
         await processing_msg.delete()
 
-        # Сохраняем в БД
+        # Сохраняем в БД (сохраняем путь к первому файлу)
         await save_request(
             user_id=user_id,
             username=username,
             request_type='document',
             content=file_name,
-            audio_path=str(audio_path),
+            audio_path=audio_files[0] if audio_files else None,
             status='success'
         )
 
@@ -329,12 +360,23 @@ async def handle_url(message: Message, url: str, user_id: int, username: str):
         from tts_common.web_parser import parse_url_async
         text = await parse_url_async(url)
 
-        # Синтезируем аудио
-        await processing_msg.edit_text("🎤 Синтезирую речь...")
-        await message.bot.send_chat_action(message.chat.id, ChatAction.RECORD_VOICE)
-
-        # Получаем персональные настройки голоса пользователя
+        # Получаем персональные настройки пользователя
         voice_name = await get_user_voice(user_id)
+        max_duration = await get_user_max_duration(user_id)
+
+        # Рассчитываем количество частей
+        parts_count, avg_duration = calculate_parts_info(text, max_duration)
+
+        if parts_count > 1:
+            duration_text = format_duration_display(avg_duration)
+            await processing_msg.edit_text(
+                f"🎤 Синтезирую речь...\n\n"
+                f"Текст будет разбит на {parts_count} частей (~{duration_text} каждая)"
+            )
+        else:
+            await processing_msg.edit_text("🎤 Синтезирую речь...")
+
+        await message.bot.send_chat_action(message.chat.id, ChatAction.RECORD_VOICE)
 
         # Генерируем имя файла из первых 7 слов извлеченного текста
         audio_filename = generate_filename_from_text(text, user_id)
@@ -344,38 +386,49 @@ async def handle_url(message: Message, url: str, user_id: int, username: str):
         estimated_size = len(text) * 300
         await storage_manager.ensure_space_available_async(estimated_size)
 
-        # Синтезируем
-        success = await synthesize_text(
+        # Синтезируем с учетом лимита длительности
+        audio_files = await synthesize_text_with_duration_limit(
             text,
             str(audio_path),
+            max_duration_minutes=max_duration,
             voice=voice_name,
             rate=TTS_RATE,
             pitch=TTS_PITCH
         )
 
-        if not success:
+        if not audio_files:
             raise Exception("Не удалось синтезировать аудио")
 
-        # Отправляем аудио
+        # Отправляем аудиофайлы
         await processing_msg.edit_text("📤 Отправляю аудио...")
-        audio_file = FSInputFile(str(audio_path))
+
         # Берем первые 7 слов для названия
         web_title = ' '.join(text.split()[:7])
-        await message.answer_audio(
-            audio_file,
-            title=web_title,
-            performer="MKttsBOT"
-        )
+
+        for i, audio_file_path in enumerate(audio_files, start=1):
+            audio_file = FSInputFile(audio_file_path)
+
+            # Формируем название с номером части если файлов несколько
+            if len(audio_files) > 1:
+                title = f"{web_title} - Часть {i}/{len(audio_files)}"
+            else:
+                title = web_title
+
+            await message.answer_audio(
+                audio_file,
+                title=title,
+                performer="MKttsBOT"
+            )
 
         await processing_msg.delete()
 
-        # Сохраняем в БД
+        # Сохраняем в БД (сохраняем путь к первому файлу)
         await save_request(
             user_id=user_id,
             username=username,
             request_type='url',
             content=url,
-            audio_path=str(audio_path),
+            audio_path=audio_files[0] if audio_files else None,
             status='success'
         )
 
@@ -405,8 +458,19 @@ async def handle_plain_text(message: Message, text: str, user_id: int, username:
     try:
         await message.bot.send_chat_action(message.chat.id, ChatAction.RECORD_VOICE)
 
-        # Получаем персональные настройки голоса пользователя
+        # Получаем персональные настройки пользователя
         voice_name = await get_user_voice(user_id)
+        max_duration = await get_user_max_duration(user_id)
+
+        # Рассчитываем количество частей
+        parts_count, avg_duration = calculate_parts_info(text, max_duration)
+
+        if parts_count > 1:
+            duration_text = format_duration_display(avg_duration)
+            await processing_msg.edit_text(
+                f"🎤 Синтезирую речь...\n\n"
+                f"Текст будет разбит на {parts_count} частей (~{duration_text} каждая)"
+            )
 
         # Синтезируем аудио - используем первые 7 слов для имени файла
         audio_filename = generate_filename_from_text(text, user_id)
@@ -416,38 +480,50 @@ async def handle_plain_text(message: Message, text: str, user_id: int, username:
         estimated_size = len(text) * 300
         await storage_manager.ensure_space_available_async(estimated_size)
 
-        # Синтезируем
-        success = await synthesize_text(
+        # Синтезируем с учетом лимита длительности
+        audio_files = await synthesize_text_with_duration_limit(
             text,
             str(audio_path),
+            max_duration_minutes=max_duration,
             voice=voice_name,
             rate=TTS_RATE,
             pitch=TTS_PITCH
         )
 
-        if not success:
+        if not audio_files:
             raise Exception("Не удалось синтезировать аудио")
 
-        # Отправляем аудио
-        audio_file = FSInputFile(str(audio_path))
-        # Берем первые 7 слов для названия (без расширения .mp3)
+        # Отправляем аудиофайлы
+        await processing_msg.edit_text("📤 Отправляю аудио...")
+
+        # Берем первые 7 слов для названия
         text_title = ' '.join(text.split()[:7])
-        await message.answer_audio(
-            audio_file,
-            title=text_title,
-            performer="MKttsBOT"
-        )
+
+        for i, audio_file_path in enumerate(audio_files, start=1):
+            audio_file = FSInputFile(audio_file_path)
+
+            # Формируем название с номером части если файлов несколько
+            if len(audio_files) > 1:
+                title = f"{text_title} - Часть {i}/{len(audio_files)}"
+            else:
+                title = text_title
+
+            await message.answer_audio(
+                audio_file,
+                title=title,
+                performer="MKttsBOT"
+            )
 
         # Удаляем сообщение о обработке
         await processing_msg.delete()
 
-        # Сохраняем в БД
+        # Сохраняем в БД (сохраняем путь к первому файлу)
         await save_request(
             user_id=user_id,
             username=username,
             request_type='text',
             content=text[:200],  # Сохраняем первые 200 символов
-            audio_path=str(audio_path),
+            audio_path=audio_files[0] if audio_files else None,
             status='success'
         )
 
@@ -773,11 +849,23 @@ async def voice_messages(
         # Объединяем все сообщения в один текст с разделителем
         combined_text = "\n\n".join([text for _, text in valid_messages])
 
-        if status_msg:
-            await status_msg.edit_text(f"🎤 Синтезирую {len(combined_text)} символов...")
-
-        # Получаем персональные настройки голоса пользователя
+        # Получаем персональные настройки пользователя
         voice_name = await get_user_voice(user_id)
+        max_duration = await get_user_max_duration(user_id)
+
+        # Рассчитываем количество частей
+        parts_count, avg_duration = calculate_parts_info(combined_text, max_duration)
+
+        if parts_count > 1:
+            duration_text = format_duration_display(avg_duration)
+            if status_msg:
+                await status_msg.edit_text(
+                    f"🎤 Синтезирую {len(combined_text)} символов...\n\n"
+                    f"Будет создано {parts_count} частей (~{duration_text} каждая)"
+                )
+        else:
+            if status_msg:
+                await status_msg.edit_text(f"🎤 Синтезирую {len(combined_text)} символов...")
 
         # Генерируем имя файла из первого сообщения
         audio_filename = generate_filename_from_text(valid_messages[0][1], user_id)
@@ -787,41 +875,50 @@ async def voice_messages(
         estimated_size = len(combined_text) * 300
         await storage_manager.ensure_space_available_async(estimated_size)
 
-        # Синтезируем объединенный текст
-        success = await synthesize_text(
+        # Синтезируем с учетом лимита длительности
+        audio_files = await synthesize_text_with_duration_limit(
             combined_text,
             str(audio_path),
+            max_duration_minutes=max_duration,
             voice=voice_name,
             rate=TTS_RATE,
             pitch=TTS_PITCH
         )
 
-        if not success:
+        if not audio_files:
             if status_msg:
                 await status_msg.edit_text("❌ Не удалось синтезировать аудио")
             return
 
-        # Отправляем аудио
+        # Отправляем аудиофайлы
         if status_msg:
             await status_msg.edit_text("📤 Отправляю аудио...")
 
-        audio_file = FSInputFile(str(audio_path))
-
-        # Формируем название аудио
+        # Формируем базовое название аудио
         if source_title:
             # Очищаем название от недопустимых символов
             clean_title = sanitize_filename(source_title).replace('.mp3', '')
-            audio_title = f"{clean_title} ({len(valid_messages)} messages)"
+            base_title = f"{clean_title} ({len(valid_messages)} messages)"
         else:
             # Fallback на старое поведение
             source_name = "Channel" if source_type == "channel" else "Chat"
-            audio_title = f"{source_name} ({len(valid_messages)} messages)"
+            base_title = f"{source_name} ({len(valid_messages)} messages)"
 
-        await message.answer_audio(
-            audio_file,
-            title=audio_title,
-            performer="MKttsBOT"
-        )
+        # Отправляем все части
+        for i, audio_file_path in enumerate(audio_files, start=1):
+            audio_file = FSInputFile(audio_file_path)
+
+            # Добавляем номер части если файлов несколько
+            if len(audio_files) > 1:
+                audio_title = f"{base_title} - Часть {i}/{len(audio_files)}"
+            else:
+                audio_title = base_title
+
+            await message.answer_audio(
+                audio_file,
+                title=audio_title,
+                performer="MKttsBOT"
+            )
 
         # Сохраняем в БД информацию о последнем озвученном сообщении
         last_msg_id = valid_messages[-1][0]
@@ -831,7 +928,7 @@ async def voice_messages(
             source_id=source_id,
             message_id=last_msg_id,
             message_text=combined_text[:200],
-            audio_path=str(audio_path)
+            audio_path=audio_files[0] if audio_files else None
         )
 
         if status_msg:
@@ -1533,6 +1630,75 @@ async def callback_set_voice(callback: CallbackQuery):
 
     voice_name = AVAILABLE_VOICES[voice_id]["name"]
     text = f"✅ <b>Голос сохранен!</b>\n\n🎤 {voice_name}"
+
+    try:
+        await callback.message.edit_text(
+            text,
+            parse_mode="HTML",
+            reply_markup=get_back_button_keyboard()
+        )
+    except TelegramBadRequest:
+        await callback.message.answer(
+            text,
+            parse_mode="HTML",
+            reply_markup=get_back_button_keyboard()
+        )
+
+
+# ===== ОБРАБОТЧИКИ ВЫБОРА ДЛИТЕЛЬНОСТИ АУДИО =====
+
+
+@router.callback_query(F.data == "select_duration")
+async def callback_select_duration(callback: CallbackQuery):
+    """Показывает меню выбора максимальной длительности аудио"""
+    await callback.answer()
+
+    user_id = callback.from_user.id
+    current_duration = await get_user_max_duration(user_id)
+
+    # Форматируем текущую настройку
+    if current_duration is None:
+        duration_text = "♾️ Без лимита"
+    else:
+        from config import AVAILABLE_DURATIONS
+        duration_text = AVAILABLE_DURATIONS.get(current_duration, f"{current_duration} минут")
+
+    text = f"⏱ <b>Максимальная длительность аудио</b>\n\nТекущая настройка: {duration_text}\n\nВыберите новое значение:"
+    keyboard = get_duration_selection_keyboard()
+
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+    except TelegramBadRequest:
+        await callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+
+
+@router.callback_query(F.data.startswith("set_duration:"))
+async def callback_set_duration(callback: CallbackQuery):
+    """Обрабатывает выбор длительности"""
+    await callback.answer()
+
+    # Парсим callback_data: set_duration:duration_value
+    duration_value = callback.data.split(":", 1)[1]
+    user_id = callback.from_user.id
+
+    # Преобразуем значение
+    if duration_value == "unlimited":
+        duration_minutes = None
+        duration_label = "♾️ Без лимита"
+    else:
+        duration_minutes = int(duration_value)
+        from config import AVAILABLE_DURATIONS
+        duration_label = AVAILABLE_DURATIONS.get(duration_minutes, f"{duration_minutes} минут")
+
+    # Сохраняем настройку
+    await set_user_max_duration(user_id, duration_minutes)
+
+    text = f"✅ <b>Настройка сохранена!</b>\n\n⏱ Максимальная длительность аудио: {duration_label}\n\n"
+
+    if duration_minutes is None:
+        text += "Текст любой длины будет синтезирован в один аудиофайл."
+    else:
+        text += f"Если текст превышает {duration_label}, он будет автоматически разбит на несколько аудиофайлов."
 
     try:
         await callback.message.edit_text(

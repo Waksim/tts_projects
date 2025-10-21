@@ -249,3 +249,106 @@ async def synthesize_text_chunks(
 
     full_text = "\n\n".join(chunks)
     return await synthesize_text(full_text, output_path, voice, rate, pitch)
+
+
+async def synthesize_text_with_duration_limit(
+    text: str,
+    output_base_path: str,
+    max_duration_minutes: int = None,
+    voice: str = VOICE,
+    rate: str = DEFAULT_RATE,
+    pitch: str = DEFAULT_PITCH,
+    chunk_limit: int = CHUNK_CHAR_LIMIT
+) -> List[str]:
+    """
+    Синтезирует текст с учетом максимальной длительности одного файла.
+    Если текст превышает лимит, создает несколько файлов.
+
+    Args:
+        text: Текст для синтеза
+        output_base_path: Базовый путь для сохранения (будет добавлен _part_N если несколько частей)
+        max_duration_minutes: Максимальная длительность одного файла в минутах (None = без лимита)
+        voice: Голос TTS
+        rate: Скорость речи
+        pitch: Высота тона
+        chunk_limit: Максимальный размер одного чанка в символах
+
+    Returns:
+        Список путей к созданным MP3 файлам (пустой список если синтез не удался)
+    """
+    from .duration_utils import split_text_by_duration, estimate_duration_minutes
+
+    print(f"Начинаю синтез с лимитом длительности: {max_duration_minutes} мин" if max_duration_minutes else "Начинаю синтез без лимита длительности")
+
+    # Разбиваем текст по лимиту длительности
+    text_parts = split_text_by_duration(text, max_duration_minutes)
+
+    if not text_parts:
+        print("❌ Ошибка: текст пустой или некорректный.")
+        return []
+
+    print(f"   Текст разбит на {len(text_parts)} частей по длительности")
+
+    # Если одна часть, создаем обычный файл
+    if len(text_parts) == 1:
+        success = await synthesize_text(
+            text_parts[0],
+            output_base_path,
+            voice,
+            rate,
+            pitch,
+            chunk_limit
+        )
+        return [output_base_path] if success else []
+
+    # Если несколько частей, создаем файлы с суффиксами _part_N
+    output_dir = os.path.dirname(output_base_path)
+    base_name = os.path.basename(output_base_path)
+    name_without_ext = os.path.splitext(base_name)[0]
+
+    created_files = []
+    tasks = []
+
+    for i, part_text in enumerate(text_parts, start=1):
+        part_filename = f"{name_without_ext}_part_{i}.mp3"
+        part_path = os.path.join(output_dir, part_filename)
+
+        # Добавляем задачу на синтез
+        async def synthesize_part(text_content, file_path):
+            success = await synthesize_text(
+                text_content,
+                file_path,
+                voice,
+                rate,
+                pitch,
+                chunk_limit
+            )
+            return (file_path, success)
+
+        tasks.append(synthesize_part(part_text, part_path))
+
+    # Запускаем все задачи параллельно
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Собираем успешно созданные файлы
+    for result in results:
+        if isinstance(result, Exception):
+            print(f"❌ Ошибка при синтезе части: {result}")
+        elif result[1]:  # success == True
+            created_files.append(result[0])
+        else:
+            print(f"❌ Не удалось синтезировать часть: {result[0]}")
+
+    # Если не все части созданы успешно, удаляем все
+    if len(created_files) != len(text_parts):
+        print(f"❌ Синтез провален: создано только {len(created_files)} из {len(text_parts)} частей. Очистка...")
+        for file_path in created_files:
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except OSError:
+                    pass
+        return []
+
+    print(f"✅ Успешно создано {len(created_files)} аудио файлов")
+    return created_files

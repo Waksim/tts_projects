@@ -9,3 +9,6 @@ uvicorn[standard]>=0.27.0
 
 # Шаблоны
 jinja2>=3.1.0
+
+# Для обработки данных из HTML-форм в FastAPI
+python-multipart

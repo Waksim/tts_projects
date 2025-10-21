@@ -14,7 +14,7 @@ git push -u origin main
 
 ```bash
 sudo apt update
-sudo apt install -y python3.10 python3.10-venv python3-pip ffmpeg git
+sudo apt install -y python3 python3-venv python3-pip ffmpeg git
 sudo fallocate -l 2G /swapfile
 sudo chmod 600 /swapfile
 sudo mkswap /swapfile

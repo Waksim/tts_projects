@@ -275,24 +275,148 @@
             margin-top: 5px;
             text-align: right;
         }
+
+        /* Переключатель режима */
+        .mode-selector {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            justify-content: center;
+        }
+
+        .mode-btn {
+            flex: 1;
+            max-width: 200px;
+            padding: 12px 20px;
+            background-color: var(--progress-bg);
+            color: var(--text-color);
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .mode-btn:hover {
+            background-color: var(--border-color);
+        }
+
+        .mode-btn.active {
+            background-color: var(--button-bg);
+            color: white;
+            border-color: var(--button-bg);
+        }
+
+        /* Кнопки управления текстом */
+        .text-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .control-btn {
+            padding: 8px 16px;
+            background-color: var(--progress-bg);
+            color: var(--text-color);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .control-btn:hover {
+            background-color: var(--border-color);
+        }
+
+        /* Область загрузки файлов */
+        .file-upload-area {
+            margin-bottom: 20px;
+        }
+
+        .upload-placeholder {
+            border: 2px dashed var(--border-color);
+            border-radius: 12px;
+            padding: 40px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .upload-placeholder:hover {
+            border-color: var(--button-bg);
+            background-color: var(--progress-bg);
+        }
+
+        .upload-placeholder.dragover {
+            border-color: var(--button-bg);
+            background-color: var(--progress-bg);
+        }
+
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+
+        .upload-text {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .upload-hint {
+            font-size: 13px;
+            color: #888;
+            line-height: 1.6;
+        }
+
+        .file-info {
+            border: 2px solid var(--success-color);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            background-color: rgba(40, 167, 69, 0.05);
+        }
+
+        .file-name {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            word-break: break-word;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="panel">
             <h1>🎤 Web TTS - Озвучивание текста</h1>
-            <p class="subtitle">Введите текст и получите аудиофайл с озвучкой на русском языке</p>
+            <p class="subtitle">Введите текст или загрузите документ для озвучивания</p>
 
+            <!-- Переключатель режима -->
+            <div class="mode-selector">
+                <button type="button" class="mode-btn active" id="text-mode-btn">📝 Текст</button>
+                <button type="button" class="mode-btn" id="document-mode-btn">📄 Документ</button>
+            </div>
+
+            <!-- Форма для текста -->
             <form id="tts-form">
+                <div class="text-controls">
+                    <button type="button" id="paste-btn" class="control-btn" title="Вставить из буфера обмена">
+                        📋 Вставить
+                    </button>
+                    <button type="button" id="clear-btn" class="control-btn" title="Очистить текст">
+                        🗑️ Очистить
+                    </button>
+                </div>
+
                 <textarea
                     id="text-input"
                     name="text"
                     placeholder="Введите текст для озвучивания..."
-                    maxlength="{{ max_text_length }}"
-                    required
                 ></textarea>
                 <div class="char-counter">
-                    <span id="char-count">0</span> / {{ max_text_length }} символов
+                    <span id="char-count">0</span> символов (без ограничений)
                 </div>
 
                 <div class="controls">
@@ -334,6 +458,69 @@
                 </div>
             </form>
 
+            <!-- Форма для документов -->
+            <form id="document-form" style="display: none;">
+                <div class="file-upload-area" id="file-upload-area">
+                    <input
+                        type="file"
+                        id="file-input"
+                        name="file"
+                        accept="{{ supported_extensions }}"
+                        style="display: none;"
+                    >
+                    <div class="upload-placeholder" id="upload-placeholder">
+                        <div class="upload-icon">📁</div>
+                        <p class="upload-text">Нажмите или перетащите документ сюда</p>
+                        <p class="upload-hint">
+                            Поддерживаемые форматы: {{ supported_extensions }}<br>
+                            Максимальный размер: {{ max_file_size_mb }} MB
+                        </p>
+                    </div>
+                    <div class="file-info" id="file-info" style="display: none;">
+                        <p class="file-name" id="file-name"></p>
+                        <button type="button" id="remove-file-btn" class="control-btn">🗑️ Удалить</button>
+                    </div>
+                </div>
+
+                <div class="controls">
+                    <div class="rate-control">
+                        <label for="rate-slider-doc">⚡ Скорость речи:</label>
+                        <div class="rate-slider">
+                            <input
+                                type="range"
+                                id="rate-slider-doc"
+                                name="rate"
+                                min="-50"
+                                max="100"
+                                value="{{ default_rate.replace('%', '').replace('+', '') }}"
+                                step="10"
+                            >
+                            <span class="rate-value" id="rate-value-doc">{{ default_rate }}</span>
+                        </div>
+                    </div>
+
+                    <button type="submit" id="submit-doc-btn">
+                        Озвучить документ
+                    </button>
+                </div>
+
+                <div class="progress-container" id="progress-container-doc">
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                    <p class="progress-text">Обрабатываю документ...</p>
+                </div>
+
+                <div class="message" id="message-doc"></div>
+
+                <div class="audio-player" id="audio-player-doc">
+                    <audio controls id="audio-element-doc"></audio>
+                    <a href="#" class="download-btn" id="download-btn-doc">
+                        <button type="button">💾 Скачать MP3</button>
+                    </a>
+                </div>
+            </form>
+
             <div class="stats">
                 💾 Хранилище: {{ "%.1f"|format(storage_stats.total_size_mb) }} MB / {{ "%.0f"|format(storage_stats.max_size_mb) }} MB
                 ({{ "%.1f"|format(storage_stats.used_percent) }}% заполнено)
@@ -342,7 +529,27 @@
     </div>
 
     <script>
-        const form = document.getElementById('tts-form');
+        // ===== ПЕРЕКЛЮЧЕНИЕ РЕЖИМОВ =====
+        const textModeBtn = document.getElementById('text-mode-btn');
+        const documentModeBtn = document.getElementById('document-mode-btn');
+        const ttsForm = document.getElementById('tts-form');
+        const documentForm = document.getElementById('document-form');
+
+        textModeBtn.addEventListener('click', () => {
+            textModeBtn.classList.add('active');
+            documentModeBtn.classList.remove('active');
+            ttsForm.style.display = 'block';
+            documentForm.style.display = 'none';
+        });
+
+        documentModeBtn.addEventListener('click', () => {
+            documentModeBtn.classList.add('active');
+            textModeBtn.classList.remove('active');
+            documentForm.style.display = 'block';
+            ttsForm.style.display = 'none';
+        });
+
+        // ===== ТЕКСТОВЫЙ РЕЖИМ =====
         const textInput = document.getElementById('text-input');
         const charCount = document.getElementById('char-count');
         const rateSlider = document.getElementById('rate-slider');
@@ -354,9 +561,12 @@
         const audioElement = document.getElementById('audio-element');
         const downloadBtn = document.getElementById('download-btn');
 
+        const pasteBtn = document.getElementById('paste-btn');
+        const clearBtn = document.getElementById('clear-btn');
+
         // Счетчик символов
         textInput.addEventListener('input', () => {
-            charCount.textContent = textInput.value.length;
+            charCount.textContent = textInput.value.length.toLocaleString();
         });
 
         // Обновление значения скорости
@@ -365,8 +575,28 @@
             rateValue.textContent = (value >= 0 ? '+' : '') + value + '%';
         });
 
-        // Обработка отправки формы
-        form.addEventListener('submit', async (e) => {
+        // Вставка из буфера обмена
+        pasteBtn.addEventListener('click', async () => {
+            try {
+                const text = await navigator.clipboard.readText();
+                textInput.value = text;
+                charCount.textContent = text.length.toLocaleString();
+                showMessage('✅ Текст вставлен из буфера обмена', 'success');
+            } catch (error) {
+                showMessage('❌ Не удалось прочитать буфер обмена. Используйте Ctrl+V', 'error');
+            }
+        });
+
+        // Очистка текста
+        clearBtn.addEventListener('click', () => {
+            textInput.value = '';
+            charCount.textContent = '0';
+            audioPlayer.style.display = 'none';
+            message.style.display = 'none';
+        });
+
+        // Обработка отправки текстовой формы
+        ttsForm.addEventListener('submit', async (e) => {
             e.preventDefault();
 
             const text = textInput.value.trim();
@@ -375,20 +605,17 @@
                 return;
             }
 
-            // Показываем прогресс
             submitBtn.disabled = true;
             progressContainer.style.display = 'block';
             audioPlayer.style.display = 'none';
             message.style.display = 'none';
 
             try {
-                // Формируем данные формы
                 const formData = new FormData();
                 formData.append('text', text);
                 const rateVal = parseInt(rateSlider.value);
                 formData.append('rate', (rateVal >= 0 ? '+' : '') + rateVal + '%');
 
-                // Отправляем запрос
                 const response = await fetch('/synthesize', {
                     method: 'POST',
                     body: formData
@@ -400,7 +627,6 @@
                     throw new Error(result.detail || 'Ошибка синтеза');
                 }
 
-                // Показываем аудио-плеер
                 const audioUrl = `/audio/${result.file_id}`;
                 audioElement.src = audioUrl;
                 downloadBtn.href = audioUrl;
@@ -419,6 +645,129 @@
             message.textContent = text;
             message.className = 'message ' + type;
             message.style.display = 'block';
+        }
+
+        // ===== РЕЖИМ ДОКУМЕНТОВ =====
+        const fileInput = document.getElementById('file-input');
+        const uploadPlaceholder = document.getElementById('upload-placeholder');
+        const fileInfo = document.getElementById('file-info');
+        const fileName = document.getElementById('file-name');
+        const removeFileBtn = document.getElementById('remove-file-btn');
+        const fileUploadArea = document.getElementById('file-upload-area');
+
+        const rateSliderDoc = document.getElementById('rate-slider-doc');
+        const rateValueDoc = document.getElementById('rate-value-doc');
+        const submitDocBtn = document.getElementById('submit-doc-btn');
+        const progressContainerDoc = document.getElementById('progress-container-doc');
+        const messageDoc = document.getElementById('message-doc');
+        const audioPlayerDoc = document.getElementById('audio-player-doc');
+        const audioElementDoc = document.getElementById('audio-element-doc');
+        const downloadBtnDoc = document.getElementById('download-btn-doc');
+
+        // Обновление значения скорости для документов
+        rateSliderDoc.addEventListener('input', () => {
+            const value = parseInt(rateSliderDoc.value);
+            rateValueDoc.textContent = (value >= 0 ? '+' : '') + value + '%';
+        });
+
+        // Клик по области загрузки
+        uploadPlaceholder.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        // Выбор файла
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                displaySelectedFile(file);
+            }
+        });
+
+        // Удаление файла
+        removeFileBtn.addEventListener('click', () => {
+            fileInput.value = '';
+            uploadPlaceholder.style.display = 'block';
+            fileInfo.style.display = 'none';
+            audioPlayerDoc.style.display = 'none';
+            messageDoc.style.display = 'none';
+        });
+
+        // Drag & Drop
+        uploadPlaceholder.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadPlaceholder.classList.add('dragover');
+        });
+
+        uploadPlaceholder.addEventListener('dragleave', () => {
+            uploadPlaceholder.classList.remove('dragover');
+        });
+
+        uploadPlaceholder.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadPlaceholder.classList.remove('dragover');
+
+            const file = e.dataTransfer.files[0];
+            if (file) {
+                fileInput.files = e.dataTransfer.files;
+                displaySelectedFile(file);
+            }
+        });
+
+        function displaySelectedFile(file) {
+            fileName.textContent = `📄 ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+            uploadPlaceholder.style.display = 'none';
+            fileInfo.style.display = 'block';
+        }
+
+        // Обработка отправки формы документа
+        documentForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            if (!fileInput.files[0]) {
+                showMessageDoc('Выберите файл для озвучивания', 'error');
+                return;
+            }
+
+            submitDocBtn.disabled = true;
+            progressContainerDoc.style.display = 'block';
+            audioPlayerDoc.style.display = 'none';
+            messageDoc.style.display = 'none';
+
+            try {
+                const formData = new FormData();
+                formData.append('file', fileInput.files[0]);
+                const rateVal = parseInt(rateSliderDoc.value);
+                formData.append('rate', (rateVal >= 0 ? '+' : '') + rateVal + '%');
+
+                const response = await fetch('/synthesize_document', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(result.detail || 'Ошибка обработки документа');
+                }
+
+                const audioUrl = `/audio/${result.file_id}`;
+                audioElementDoc.src = audioUrl;
+                downloadBtnDoc.href = audioUrl;
+                audioPlayerDoc.style.display = 'block';
+                showMessageDoc('✅ Документ успешно озвучен!', 'success');
+
+            } catch (error) {
+                showMessageDoc('❌ ' + error.message, 'error');
+            } finally {
+                submitDocBtn.disabled = false;
+                progressContainerDoc.style.display = 'none';
+            }
+        });
+
+        function showMessageDoc(text, type) {
+            messageDoc.textContent = text;
+            messageDoc.className = 'message ' + type;
+            messageDoc.style.display = 'block';
         }
     </script>
 </body>

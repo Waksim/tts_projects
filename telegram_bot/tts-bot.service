@@ -1,0 +1,21 @@
+[Unit]
+Description=TTS Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USERNAME
+WorkingDirectory=/path/to/tts_projects/telegram_bot
+Environment="PATH=/path/to/venv/bin"
+ExecStart=/path/to/venv/bin/python main.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/tts-bot.log
+StandardError=append:/var/log/tts-bot-error.log
+
+# Ограничения ресурсов для сервера с 1GB RAM
+MemoryMax=300M
+MemoryHigh=250M
+
+[Install]
+WantedBy=multi-user.target

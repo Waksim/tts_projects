@@ -90,8 +90,9 @@ class UserSettings(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, unique=True, index=True)
     voice_name: Mapped[str] = mapped_column(String(100), nullable=False, default="ru-RU-DmitryNeural")
+    max_audio_duration_minutes: Mapped[int] = mapped_column(Integer, nullable=True, default=None)  # None = без лимита
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     def __repr__(self):
-        return f"<UserSettings(user_id={self.user_id}, voice={self.voice_name})>"
+        return f"<UserSettings(user_id={self.user_id}, voice={self.voice_name}, max_duration={self.max_audio_duration_minutes})>"

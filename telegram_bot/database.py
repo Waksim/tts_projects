@@ -275,3 +275,62 @@ async def set_user_voice(user_id: int, voice_name: str):
             session.add(settings)
 
         await session.commit()
+
+
+async def get_user_max_duration(user_id: int):
+    """
+    Возвращает настройку максимальной длительности аудио для пользователя.
+
+    Args:
+        user_id: ID пользователя
+
+    Returns:
+        Максимальная длительность в минутах или None (без лимита)
+    """
+    from models import UserSettings
+    from sqlalchemy import select
+    from config import DEFAULT_MAX_DURATION_MINUTES
+
+    async with async_session_factory() as session:
+        stmt = select(UserSettings).where(UserSettings.user_id == user_id)
+        result = await session.execute(stmt)
+        settings = result.scalar_one_or_none()
+
+        if settings:
+            return settings.max_audio_duration_minutes
+        else:
+            # Возвращаем дефолтное значение из config
+            return DEFAULT_MAX_DURATION_MINUTES
+
+
+async def set_user_max_duration(user_id: int, max_duration_minutes: int):
+    """
+    Сохраняет настройку максимальной длительности аудио для пользователя.
+
+    Args:
+        user_id: ID пользователя
+        max_duration_minutes: Максимальная длительность в минутах или None (без лимита)
+    """
+    from models import UserSettings
+    from sqlalchemy import select
+    from datetime import datetime
+
+    async with async_session_factory() as session:
+        # Проверяем существование настроек
+        stmt = select(UserSettings).where(UserSettings.user_id == user_id)
+        result = await session.execute(stmt)
+        settings = result.scalar_one_or_none()
+
+        if settings:
+            # Обновляем существующие настройки
+            settings.max_audio_duration_minutes = max_duration_minutes
+            settings.updated_at = datetime.utcnow()
+        else:
+            # Создаем новые настройки
+            settings = UserSettings(
+                user_id=user_id,
+                max_audio_duration_minutes=max_duration_minutes
+            )
+            session.add(settings)
+
+        await session.commit()

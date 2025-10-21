@@ -35,9 +35,13 @@ def get_main_menu_keyboard(user_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="💬 Мои чаты", callback_data="my_chats")
         ])
 
-    # Кнопка выбора голоса
+    # Кнопки настроек
     keyboard.append([
         InlineKeyboardButton(text="🎤 Выбор голоса", callback_data="select_voice")
+    ])
+
+    keyboard.append([
+        InlineKeyboardButton(text="⏱ Длительность аудио", callback_data="select_duration")
     ])
 
     keyboard.append([
@@ -188,6 +192,34 @@ def get_voice_selection_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(
                 text=voice_info["name"],
                 callback_data=f"set_voice:{voice_id}"
+            )
+        ])
+
+    # Кнопка "Назад"
+    keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main")])
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_duration_selection_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает клавиатуру для выбора максимальной длительности аудио.
+
+    Returns:
+        InlineKeyboardMarkup с кнопками выбора длительности
+    """
+    from config import AVAILABLE_DURATIONS
+
+    keyboard = []
+
+    # Кнопки для каждого варианта длительности
+    for duration_minutes, duration_label in AVAILABLE_DURATIONS.items():
+        # Используем специальный маркер "unlimited" для None
+        callback_value = "unlimited" if duration_minutes is None else str(duration_minutes)
+        keyboard.append([
+            InlineKeyboardButton(
+                text=duration_label,
+                callback_data=f"set_duration:{callback_value}"
             )
         ])
 

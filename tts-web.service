@@ -1,0 +1,16 @@
+[Unit]
+Description=TTS Web Application
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/tts_projects/web_tts
+Environment="PATH=/home/ubuntu/tts_projects/venv/bin"
+ExecStart=/home/ubuntu/tts_projects/venv/bin/python main.py
+Restart=always
+RestartSec=10
+MemoryMax=300M
+
+[Install]
+WantedBy=multi-user.target

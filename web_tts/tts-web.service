@@ -1,0 +1,21 @@
+[Unit]
+Description=TTS Web Application
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USERNAME
+WorkingDirectory=/path/to/tts_projects/web_tts
+Environment="PATH=/path/to/venv/bin"
+ExecStart=/path/to/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8001 --workers 1
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/tts-web.log
+StandardError=append:/var/log/tts-web-error.log
+
+# Ограничения ресурсов для сервера с 1GB RAM
+MemoryMax=300M
+MemoryHigh=250M
+
+[Install]
+WantedBy=multi-user.target

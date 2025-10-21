@@ -30,7 +30,7 @@ async def _merge_mp3_parts(part_files: List[str], final_path: str) -> bool:
     """
     Сшивает части MP3 в один файл с помощью ffmpeg и удаляет части.
     """
-    print(f"   Сшиваю {len(part_files)} частей в {os.path.basename(final_path)}...")
+    print(f"   Сшиваю {len(part_files)} частей в {os.path.basename(final_path)}...", flush=True)
     list_file_path = f"{final_path}.list.txt"
 
     try:
@@ -58,15 +58,15 @@ async def _merge_mp3_parts(part_files: List[str], final_path: str) -> bool:
         stdout, stderr = await process.communicate()
 
         if process.returncode != 0:
-            print(f"❌ Ошибка ffmpeg при сшивке файла {os.path.basename(final_path)}:")
-            print(stderr.decode(errors='ignore'))
+            print(f"❌ Ошибка ffmpeg при сшивке файла {os.path.basename(final_path)}:", flush=True)
+            print(stderr.decode(errors='ignore'), flush=True)
             return False
 
-        print(f"✅ Файл успешно сшит. Удаляю временные части...")
+        print(f"✅ Файл успешно сшит. Удаляю временные части...", flush=True)
         return True
 
     except Exception as e:
-        print(f"❌ Критическая ошибка в процессе сшивки: {e}")
+        print(f"❌ Критическая ошибка в процессе сшивки: {e}", flush=True)
         return False
     finally:
         # Гарантированно удаляем временные файлы
@@ -112,7 +112,7 @@ async def _synthesize_single_chunk(
                     f"Валидация провалена: размер файла {file_size} Б, < требуемых {min_required_size} Б."
                 )
 
-            print(f"✅ Успешно создан и проверен файл: {os.path.basename(mp3_path)}")
+            print(f"✅ Успешно создан и проверен файл: {os.path.basename(mp3_path)}", flush=True)
             return True
 
         except Exception as e:
@@ -122,13 +122,13 @@ async def _synthesize_single_chunk(
                 except OSError:
                     pass
 
-            print(f"⚠️ Ошибка синтеза (попытка {attempt + 1}/{MAX_RETRIES}): {e}")
+            print(f"⚠️ Ошибка синтеза (попытка {attempt + 1}/{MAX_RETRIES}): {e}", flush=True)
             if attempt < MAX_RETRIES - 1:
-                print(f"   Повторная попытка через {current_delay} секунд...")
+                print(f"   Повторная попытка через {current_delay} секунд...", flush=True)
                 await asyncio.sleep(current_delay)
                 current_delay *= 2
             else:
-                print(f"❌ Не удалось синтезировать {os.path.basename(mp3_path)} после {MAX_RETRIES} попыток.")
+                print(f"❌ Не удалось синтезировать {os.path.basename(mp3_path)} после {MAX_RETRIES} попыток.", flush=True)
                 return False
     return False
 
@@ -160,7 +160,7 @@ async def synthesize_text(
 
     start_time = time.monotonic()
     char_count = len(text)
-    print(f"Начинаю синтез для файла: {os.path.basename(output_path)}")
+    print(f"Начинаю синтез для файла: {os.path.basename(output_path)}", flush=True)
 
     output_dir = os.path.dirname(output_path)
     if output_dir:
@@ -168,10 +168,10 @@ async def synthesize_text(
 
     chunks = split_text_into_chunks(text, chunk_limit)
     if not chunks:
-        print("❌ Ошибка: текст пустой или некорректный.")
+        print("❌ Ошибка: текст пустой или некорректный.", flush=True)
         return False
 
-    print(f"   Текст разбит на {len(chunks)} частей. Начинаю синтез...")
+    print(f"   Текст разбит на {len(chunks)} частей. Начинаю синтез...", flush=True)
 
     # Если один чанк - создаем сразу финальный файл
     if len(chunks) == 1:
@@ -180,8 +180,8 @@ async def synthesize_text(
 
         duration = time.monotonic() - start_time
         speed = char_count / duration if duration > 0 else 0
-        print(f"📊 Озвучено {char_count} символов за {duration:.2f}с (скорость: {speed:.0f} симв/с)")
-        print(f"Синтез завершен. Статус: {'Успех' if success else 'Провал'}")
+        print(f"📊 Озвучено {char_count} символов за {duration:.2f}с (скорость: {speed:.0f} симв/с)", flush=True)
+        print(f"Синтез завершен. Статус: {'Успех' if success else 'Провал'}", flush=True)
         return success
 
     # Множество чанков - создаем части и сшиваем
@@ -207,7 +207,7 @@ async def synthesize_text(
     all_chunks_succeeded = True
     for i, result in enumerate(results):
         if isinstance(result, Exception):
-            print(f"❌ Ошибка в задаче синтеза части {i + 1}: {result}")
+            print(f"❌ Ошибка в задаче синтеза части {i + 1}: {result}", flush=True)
             all_chunks_succeeded = False
         elif result is True:
             created_parts.append(part_filepaths[i])
@@ -216,7 +216,7 @@ async def synthesize_text(
 
     # Если хотя бы одна часть не удалась, чистим и выходим
     if not all_chunks_succeeded:
-        print(f"❌ Синтез провален. Очистка...")
+        print(f"❌ Синтез провален. Очистка...", flush=True)
         for part_file in created_parts:
             if os.path.exists(part_file):
                 try:
@@ -232,8 +232,8 @@ async def synthesize_text(
     duration = time.monotonic() - start_time
     speed = char_count / duration if duration > 0 else 0
     status_msg = 'Успех' if final_success else 'Провал'
-    print(f"📊 Озвучено {char_count} символов за {duration:.2f}с (скорость: {speed:.0f} симв/с)")
-    print(f"Синтез завершен. Статус: {status_msg}")
+    print(f"📊 Озвучено {char_count} символов за {duration:.2f}с (скорость: {speed:.0f} симв/с)", flush=True)
+    print(f"Синтез завершен. Статус: {status_msg}", flush=True)
 
     return final_success
 
@@ -288,17 +288,17 @@ async def synthesize_text_with_duration_limit(
 
     start_time = time.monotonic()
     char_count = len(text)
-    print(f"Начинаю синтез с лимитом длительности: {max_duration_minutes} мин" if max_duration_minutes else "Начинаю синтез без лимита длительности")
-    print(f"Общее количество символов: {char_count}")
+    print(f"Начинаю синтез с лимитом длительности: {max_duration_minutes} мин" if max_duration_minutes else "Начинаю синтез без лимита длительности", flush=True)
+    print(f"Общее количество символов: {char_count}", flush=True)
 
     # Разбиваем текст по лимиту длительности
     text_parts = split_text_by_duration(text, max_duration_minutes)
 
     if not text_parts:
-        print("❌ Ошибка: текст пустой или некорректный.")
+        print("❌ Ошибка: текст пустой или некорректный.", flush=True)
         return []
 
-    print(f"   Текст разбит на {len(text_parts)} частей по длительности")
+    print(f"   Текст разбит на {len(text_parts)} частей по длительности", flush=True)
 
     # Если одна часть, создаем обычный файл
     if len(text_parts) == 1:
@@ -312,7 +312,7 @@ async def synthesize_text_with_duration_limit(
         )
         duration = time.monotonic() - start_time
         speed = char_count / duration if duration > 0 else 0
-        print(f"📊 Итого озвучено {char_count} символов за {duration:.2f}с (скорость: {speed:.0f} симв/с)")
+        print(f"📊 Итого озвучено {char_count} символов за {duration:.2f}с (скорость: {speed:.0f} симв/с)", flush=True)
         return [output_base_path] if success else []
 
     # Если несколько частей, создаем файлы с суффиксами _part_N
@@ -352,12 +352,12 @@ async def synthesize_text_with_duration_limit(
     results_dict = {}
     for result in results:
         if isinstance(result, Exception):
-            print(f"❌ Ошибка при синтезе части: {result}")
+            print(f"❌ Ошибка при синтезе части: {result}", flush=True)
         elif result[2]:  # success == True
             part_num, file_path, _ = result
             results_dict[part_num] = file_path
         else:
-            print(f"❌ Не удалось синтезировать часть: {result[1]}")
+            print(f"❌ Не удалось синтезировать часть: {result[1]}", flush=True)
 
     # Собираем файлы в правильном порядке по номерам частей
     for i in range(1, total_parts + 1):
@@ -366,7 +366,7 @@ async def synthesize_text_with_duration_limit(
 
     # Если не все части созданы успешно, удаляем все
     if len(created_files) != len(text_parts):
-        print(f"❌ Синтез провален: создано только {len(created_files)} из {len(text_parts)} частей. Очистка...")
+        print(f"❌ Синтез провален: создано только {len(created_files)} из {len(text_parts)} частей. Очистка...", flush=True)
         for file_path in created_files:
             if os.path.exists(file_path):
                 try:
@@ -377,6 +377,6 @@ async def synthesize_text_with_duration_limit(
 
     duration = time.monotonic() - start_time
     speed = char_count / duration if duration > 0 else 0
-    print(f"📊 Итого озвучено {char_count} символов за {duration:.2f}с (скорость: {speed:.0f} симв/с)")
-    print(f"✅ Успешно создано {len(created_files)} аудио файлов")
+    print(f"📊 Итого озвучено {char_count} символов за {duration:.2f}с (скорость: {speed:.0f} симв/с)", flush=True)
+    print(f"✅ Успешно создано {len(created_files)} аудио файлов", flush=True)
     return created_files

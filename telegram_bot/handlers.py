@@ -47,7 +47,9 @@ from config import (
     MAX_TEXT_LENGTH,
     MAX_FILE_SIZE_MB,
     MAX_STORAGE_MB,
-    OWNER_ID
+    OWNER_ID,
+    AVAILABLE_VOICES,
+    VOICE_STYLES
 )
 from database import (
     save_request,
@@ -56,7 +58,9 @@ from database import (
     get_tracked_channels,
     get_tracked_chats,
     save_voiced_message,
-    get_last_voiced_message_id
+    get_last_voiced_message_id,
+    get_user_voice,
+    set_user_voice
 )
 from telethon_service import get_telethon_service
 from keyboards import (
@@ -65,7 +69,9 @@ from keyboards import (
     get_posts_count_keyboard,
     get_my_channels_keyboard,
     get_messages_count_keyboard,
-    get_my_chats_keyboard
+    get_my_chats_keyboard,
+    get_voice_selection_keyboard,
+    get_dariya_style_keyboard
 )
 from states import AddChannelStates, AddChatStates
 
@@ -112,31 +118,51 @@ async def show_main_menu(message: Message, edit: bool = False):
         await message.answer(text, reply_markup=markup, parse_mode="HTML")
 
 
+def get_voice_display_name(voice_name: str, voice_style: str | None) -> str:
+    """Формирует красивое отображение голоса для пользователя"""
+    # Получаем базовое имя голоса
+    if voice_name in AVAILABLE_VOICES:
+        display_name = AVAILABLE_VOICES[voice_name]["name"]
+    else:
+        display_name = voice_name  # fallback на ID голоса
+
+    # Добавляем стиль если есть
+    if voice_style and voice_style in VOICE_STYLES:
+        display_name += f" ({VOICE_STYLES[voice_style]})"
+
+    return display_name
+
+
 @router.message(Command("help"))
 async def cmd_help(message: Message):
     """Обработчик команды /help"""
     user_id = message.from_user.id
+
+    # Получаем текущий голос пользователя
+    voice_name, voice_style = await get_user_voice(user_id)
+    voice_display = get_voice_display_name(voice_name, voice_style)
 
     help_text = f"""
 📖 <b>Помощь по использованию бота</b>
 
 <b>Основные команды:</b>
 /start - Начать работу с ботом
+/menu - Показать главное меню
 /help - Показать эту справку
 /stats - Статистика хранилища
 
 <b>Работа с каналами:</b>
-/add_channel @username N - Добавить канал и озвучить последние N постов
-/my_channels - Список отслеживаемых каналов
-/voice_new - Озвучить новые посты из всех каналов
+Используйте кнопки в меню (/menu) или команды:
+/add_channel @username N - Добавить канал
+/my_channels - Список каналов
+/voice_new - Озвучить новые посты
 """
 
     if is_owner(user_id):
         help_text += """
 <b>Работа с чатами (только для владельца):</b>
-/add_chat @username N - Добавить чат и озвучить последние N сообщений
-/add_chat ID N - Добавить чат по ID
-/my_chats - Список отслеживаемых чатов
+/add_chat @username N - Добавить чат
+/my_chats - Список чатов
 """
 
     help_text += f"""
@@ -144,17 +170,16 @@ async def cmd_help(message: Message):
 {', '.join(SUPPORTED_EXTENSIONS)}
 
 <b>Способы озвучки:</b>
-1️⃣ <b>Текст</b> - просто отправьте текст (до {MAX_TEXT_LENGTH} символов)
-2️⃣ <b>Документ</b> - отправьте файл (до {MAX_FILE_SIZE_MB} MB)
-3️⃣ <b>Ссылка</b> - отправьте URL веб-страницы
-4️⃣ <b>Пересланное сообщение</b> - перешлите пост с любого канала
+1️⃣ <b>Текст</b> - просто отправьте текст
+2️⃣ <b>Документ</b> - отправьте файл
+3️⃣ <b>Ссылка</b> - отправьте URL
+4️⃣ <b>Пересланное сообщение</b> - перешлите пост
 
 <b>Настройки TTS:</b>
-🎤 Голос: {TTS_VOICE}
+🎤 Ваш голос: {voice_display}
 ⚡ Скорость: {TTS_RATE}
-🎵 Высота: {TTS_PITCH}
 
-💾 Хранилище: {MAX_STORAGE_MB} MB (старые файлы удаляются автоматически)
+💾 Хранилище: {MAX_STORAGE_MB} MB
 """
     await message.answer(help_text, parse_mode="HTML")
 
@@ -234,6 +259,9 @@ async def handle_document(message: Message):
         await processing_msg.edit_text("🎤 Синтезирую речь...")
         await message.bot.send_chat_action(message.chat.id, ChatAction.RECORD_VOICE)
 
+        # Получаем персональные настройки голоса пользователя
+        voice_name, voice_style = await get_user_voice(user_id)
+
         # Генерируем имя файла из первых 7 слов текста
         audio_filename = generate_filename_from_text(text, user_id)
         audio_path = AUDIO_DIR / audio_filename
@@ -246,9 +274,10 @@ async def handle_document(message: Message):
         success = await synthesize_text(
             text,
             str(audio_path),
-            voice=TTS_VOICE,
+            voice=voice_name,
             rate=TTS_RATE,
-            pitch=TTS_PITCH
+            pitch=TTS_PITCH,
+            style=voice_style
         )
 
         if not success:
@@ -338,6 +367,9 @@ async def handle_url(message: Message, url: str, user_id: int, username: str):
         await processing_msg.edit_text("🎤 Синтезирую речь...")
         await message.bot.send_chat_action(message.chat.id, ChatAction.RECORD_VOICE)
 
+        # Получаем персональные настройки голоса пользователя
+        voice_name, voice_style = await get_user_voice(user_id)
+
         # Генерируем имя файла из первых 7 слов извлеченного текста
         audio_filename = generate_filename_from_text(text, user_id)
         audio_path = AUDIO_DIR / audio_filename
@@ -350,9 +382,10 @@ async def handle_url(message: Message, url: str, user_id: int, username: str):
         success = await synthesize_text(
             text,
             str(audio_path),
-            voice=TTS_VOICE,
+            voice=voice_name,
             rate=TTS_RATE,
-            pitch=TTS_PITCH
+            pitch=TTS_PITCH,
+            style=voice_style
         )
 
         if not success:
@@ -415,6 +448,9 @@ async def handle_plain_text(message: Message, text: str, user_id: int, username:
     try:
         await message.bot.send_chat_action(message.chat.id, ChatAction.RECORD_VOICE)
 
+        # Получаем персональные настройки голоса пользователя
+        voice_name, voice_style = await get_user_voice(user_id)
+
         # Синтезируем аудио - используем первые 7 слов для имени файла
         audio_filename = generate_filename_from_text(text, user_id)
         audio_path = AUDIO_DIR / audio_filename
@@ -427,9 +463,10 @@ async def handle_plain_text(message: Message, text: str, user_id: int, username:
         success = await synthesize_text(
             text,
             str(audio_path),
-            voice=TTS_VOICE,
+            voice=voice_name,
             rate=TTS_RATE,
-            pitch=TTS_PITCH
+            pitch=TTS_PITCH,
+            style=voice_style
         )
 
         if not success:
@@ -788,6 +825,9 @@ async def voice_messages(
         if status_msg:
             await status_msg.edit_text(f"🎤 Синтезирую {len(combined_text)} символов...")
 
+        # Получаем персональные настройки голоса пользователя
+        voice_name, voice_style = await get_user_voice(user_id)
+
         # Генерируем имя файла из первого сообщения
         audio_filename = generate_filename_from_text(valid_messages[0][1], user_id)
         audio_path = AUDIO_DIR / audio_filename
@@ -800,9 +840,10 @@ async def voice_messages(
         success = await synthesize_text(
             combined_text,
             str(audio_path),
-            voice=TTS_VOICE,
+            voice=voice_name,
             rate=TTS_RATE,
-            pitch=TTS_PITCH
+            pitch=TTS_PITCH,
+            style=voice_style
         )
 
         if not success:
@@ -940,6 +981,11 @@ async def callback_help(callback: CallbackQuery):
     await callback.answer()
 
     user_id = callback.from_user.id
+
+    # Получаем текущий голос пользователя
+    voice_name, voice_style = await get_user_voice(user_id)
+    voice_display = get_voice_display_name(voice_name, voice_style)
+
     help_text = f"""
 📖 <b>Помощь по использованию бота</b>
 
@@ -974,7 +1020,7 @@ async def callback_help(callback: CallbackQuery):
 4️⃣ <b>Пересланное сообщение</b> - перешлите пост
 
 <b>Настройки TTS:</b>
-🎤 Голос: {TTS_VOICE}
+🎤 Ваш голос: {voice_display}
 ⚡ Скорость: {TTS_RATE}
 
 💾 Хранилище: {MAX_STORAGE_MB} MB
@@ -1502,5 +1548,91 @@ async def callback_voice_new(callback: CallbackQuery):
         logger.error(f"Ошибка при озвучке новых сообщений: {e}")
         await callback.message.edit_text(
             f"❌ Ошибка: {str(e)}",
+            reply_markup=get_back_button_keyboard()
+        )
+
+
+# ===== ОБРАБОТЧИКИ ВЫБОРА ГОЛОСА =====
+
+
+@router.callback_query(F.data == "select_voice")
+async def callback_select_voice(callback: CallbackQuery):
+    """Показывает меню выбора голоса"""
+    await callback.answer()
+
+    text = "🎤 <b>Выбор голоса</b>\n\nВыберите голос для озвучивания:"
+    keyboard = get_voice_selection_keyboard()
+
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+    except TelegramBadRequest:
+        await callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+
+
+@router.callback_query(F.data.startswith("set_voice:"))
+async def callback_set_voice(callback: CallbackQuery):
+    """Обрабатывает выбор голоса"""
+    await callback.answer()
+
+    # Парсим callback_data: set_voice:voice_id
+    voice_id = callback.data.split(":", 1)[1]
+    user_id = callback.from_user.id
+
+    # Проверяем, нужно ли выбрать стиль для Дарии
+    if voice_id == "ru-RU-DariyaNeural":
+        # Показываем меню выбора стиля
+        text = "👩 <b>Голос Дарии</b>\n\nВыберите стиль голоса:"
+        keyboard = get_dariya_style_keyboard()
+
+        try:
+            await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+        except TelegramBadRequest:
+            await callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+    else:
+        # Сохраняем голос без стиля
+        await set_user_voice(user_id, voice_id, voice_style=None)
+
+        voice_name = AVAILABLE_VOICES[voice_id]["name"]
+        text = f"✅ <b>Голос сохранен!</b>\n\n🎤 {voice_name}"
+
+        try:
+            await callback.message.edit_text(
+                text,
+                parse_mode="HTML",
+                reply_markup=get_back_button_keyboard()
+            )
+        except TelegramBadRequest:
+            await callback.message.answer(
+                text,
+                parse_mode="HTML",
+                reply_markup=get_back_button_keyboard()
+            )
+
+
+@router.callback_query(F.data.startswith("set_voice_style:"))
+async def callback_set_voice_style(callback: CallbackQuery):
+    """Обрабатывает выбор стиля для голоса Дарии"""
+    await callback.answer()
+
+    # Парсим callback_data: set_voice_style:style_id
+    style_id = callback.data.split(":", 1)[1]
+    user_id = callback.from_user.id
+
+    # Сохраняем голос Дарии со стилем
+    await set_user_voice(user_id, "ru-RU-DariyaNeural", voice_style=style_id)
+
+    style_name = VOICE_STYLES[style_id]
+    text = f"✅ <b>Голос сохранен!</b>\n\n🎤 👩 Дария ({style_name})"
+
+    try:
+        await callback.message.edit_text(
+            text,
+            parse_mode="HTML",
+            reply_markup=get_back_button_keyboard()
+        )
+    except TelegramBadRequest:
+        await callback.message.answer(
+            text,
+            parse_mode="HTML",
             reply_markup=get_back_button_keyboard()
         )

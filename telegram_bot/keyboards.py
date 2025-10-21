@@ -35,6 +35,11 @@ def get_main_menu_keyboard(user_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="💬 Мои чаты", callback_data="my_chats")
         ])
 
+    # Кнопка выбора голоса
+    keyboard.append([
+        InlineKeyboardButton(text="🎤 Выбор голоса", callback_data="select_voice")
+    ])
+
     keyboard.append([
         InlineKeyboardButton(text="📊 Статистика", callback_data="stats"),
         InlineKeyboardButton(text="❓ Помощь", callback_data="help")
@@ -162,6 +167,58 @@ def get_my_chats_keyboard(chats: list) -> InlineKeyboardMarkup:
 
     # Кнопка "Назад"
     keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main")])
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_voice_selection_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает клавиатуру для выбора голоса.
+
+    Returns:
+        InlineKeyboardMarkup с кнопками выбора голосов
+    """
+    from config import AVAILABLE_VOICES
+
+    keyboard = []
+
+    # Кнопки для каждого голоса
+    for voice_id, voice_info in AVAILABLE_VOICES.items():
+        keyboard.append([
+            InlineKeyboardButton(
+                text=voice_info["name"],
+                callback_data=f"set_voice:{voice_id}"
+            )
+        ])
+
+    # Кнопка "Назад"
+    keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_main")])
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_dariya_style_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает клавиатуру для выбора стиля голоса Дарии.
+
+    Returns:
+        InlineKeyboardMarkup с кнопками выбора стилей
+    """
+    from config import VOICE_STYLES
+
+    keyboard = []
+
+    # Кнопки для каждого стиля
+    for style_id, style_name in VOICE_STYLES.items():
+        keyboard.append([
+            InlineKeyboardButton(
+                text=style_name,
+                callback_data=f"set_voice_style:{style_id}"
+            )
+        ])
+
+    # Кнопка "Назад"
+    keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="select_voice")])
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 

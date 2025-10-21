@@ -26,6 +26,9 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+# --- НОВЫЕ ИМПОРТЫ для меню команд ---
+from aiogram.types import BotCommand, BotCommandScopeDefault, BotCommandScopeChat
+# ------------------------------------
 
 from config import (
     BOT_TOKEN,
@@ -33,12 +36,15 @@ from config import (
     TELETHON_API_ID,
     TELETHON_API_HASH,
     TELETHON_PHONE,
-    TELETHON_SESSION
+    TELETHON_SESSION,
+    OWNER_ID  # <-- ДОБАВЛЕНО: импортируем ID владельца
 )
 from database import init_db
 from handlers import router
 from telethon_service import init_telethon_service, stop_telethon_service
+# --- ИЗМЕНЕНО: теперь используем новый middleware ---
 from middlewares import SubscriptionCheckMiddleware
+# -----------------------------------------------
 
 # Настройка логирования
 logging.basicConfig(
@@ -52,14 +58,39 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Уменьшаем уровень логирования для aiogram чтобы скрыть лишние предупреждения
+# Уменьшаем уровень логирования для aiogram
 logging.getLogger("aiogram.event").setLevel(logging.WARNING)
 logging.getLogger("aiogram.dispatcher").setLevel(logging.WARNING)
 logging.getLogger("telethon").setLevel(logging.WARNING)
 
-# Логируем версию Python и подтверждение отключения uvloop
 if sys.version_info >= (3, 13):
     logger.info("✓ Принудительно установлен стандартный asyncio для Python 3.13+")
+
+
+# --- НОВЫЙ БЛОК: Функция для установки команд меню ---
+async def set_bot_commands(bot: Bot):
+    """Устанавливает команды в меню бота для разных типов пользователей."""
+
+    # Команды для обычных пользователей
+    user_commands = [
+        BotCommand(command="menu", description="🎛 Главное меню"),
+        BotCommand(command="voice_new", description="🔊 Озвучить новое"),
+        BotCommand(command="my_channels", description="📢 Мои каналы"),
+        BotCommand(command="help", description="📖 Помощь"),
+        BotCommand(command="stats", description="📊 Статистика"),
+    ]
+    await bot.set_my_commands(user_commands, scope=BotCommandScopeDefault())
+    logger.info("✓ Установлены команды для обычных пользователей.")
+
+    # Добавляем команды для владельца бота
+    owner_commands = user_commands + [
+        BotCommand(command="add_chat", description="💬 Добавить чат (админ)"),
+        BotCommand(command="my_chats", description="📜 Мои чаты (админ)"),
+    ]
+    await bot.set_my_commands(owner_commands, scope=BotCommandScopeChat(chat_id=OWNER_ID))
+    logger.info(f"✓ Установлены расширенные команды для владельца (ID: {OWNER_ID}).")
+
+# ---------------------------------------------------
 
 
 async def on_startup(dispatcher: Dispatcher, bot: Bot):
@@ -70,7 +101,10 @@ async def on_startup(dispatcher: Dispatcher, bot: Bot):
 
     # Инициализируем базу данных
     await init_db()
-    logger.info("✓ База данных инициализирована")
+
+    # --- ДОБАВЛЕНО: Устанавливаем команды меню ---
+    await set_bot_commands(bot)
+    # ------------------------------------------
 
     # Инициализируем Telethon сервис
     if TELETHON_API_ID and TELETHON_API_ID != 0:

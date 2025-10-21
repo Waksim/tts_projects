@@ -44,8 +44,6 @@ from config import (
     TTS_VOICE,
     TTS_RATE,
     TTS_PITCH,
-    MAX_TEXT_LENGTH,
-    MAX_FILE_SIZE_MB,
     MAX_STORAGE_MB,
     OWNER_ID,
     AVAILABLE_VOICES
@@ -201,15 +199,6 @@ async def handle_document(message: Message):
     user_id = message.from_user.id
     username = message.from_user.username or message.from_user.first_name
 
-    # Проверяем размер файла
-    file_size_mb = document.file_size / 1024 / 1024
-    if file_size_mb > MAX_FILE_SIZE_MB:
-        await message.answer(
-            f"❌ Файл слишком большой ({file_size_mb:.1f} MB). "
-            f"Максимальный размер: {MAX_FILE_SIZE_MB} MB"
-        )
-        return
-
     # Проверяем расширение файла
     file_name = document.file_name
     file_ext = os.path.splitext(file_name)[1].lower()
@@ -240,14 +229,6 @@ async def handle_document(message: Message):
 
         # Удаляем временный файл
         os.remove(temp_file_path)
-
-        # Проверяем длину текста
-        if len(text) > MAX_TEXT_LENGTH:
-            await processing_msg.edit_text(
-                f"❌ Текст слишком длинный ({len(text)} символов). "
-                f"Максимум: {MAX_TEXT_LENGTH} символов"
-            )
-            return
 
         # Синтезируем аудио
         await processing_msg.edit_text("🎤 Синтезирую речь...")
@@ -348,14 +329,6 @@ async def handle_url(message: Message, url: str, user_id: int, username: str):
         from tts_common.web_parser import parse_url_async
         text = await parse_url_async(url)
 
-        # Проверяем длину текста
-        if len(text) > MAX_TEXT_LENGTH:
-            await processing_msg.edit_text(
-                f"❌ Текст слишком длинный ({len(text)} символов). "
-                f"Максимум: {MAX_TEXT_LENGTH} символов"
-            )
-            return
-
         # Синтезируем аудио
         await processing_msg.edit_text("🎤 Синтезирую речь...")
         await message.bot.send_chat_action(message.chat.id, ChatAction.RECORD_VOICE)
@@ -422,14 +395,6 @@ async def handle_url(message: Message, url: str, user_id: int, username: str):
 
 async def handle_plain_text(message: Message, text: str, user_id: int, username: str):
     """Обработчик обычного текста"""
-
-    # Проверяем длину текста
-    if len(text) > MAX_TEXT_LENGTH:
-        await message.answer(
-            f"❌ Текст слишком длинный ({len(text)} символов). "
-            f"Максимум: {MAX_TEXT_LENGTH} символов"
-        )
-        return
 
     if len(text) < 10:
         await message.answer("❌ Текст слишком короткий. Минимум 10 символов.")
@@ -807,11 +772,6 @@ async def voice_messages(
 
         # Объединяем все сообщения в один текст с разделителем
         combined_text = "\n\n".join([text for _, text in valid_messages])
-
-        # Обрезаем если слишком длинный
-        if len(combined_text) > MAX_TEXT_LENGTH:
-            combined_text = combined_text[:MAX_TEXT_LENGTH]
-            logger.warning(f"Текст обрезан до {MAX_TEXT_LENGTH} символов")
 
         if status_msg:
             await status_msg.edit_text(f"🎤 Синтезирую {len(combined_text)} символов...")

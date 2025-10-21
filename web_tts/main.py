@@ -35,7 +35,6 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
 
 MAX_STORAGE_MB = 500
-MAX_FILE_SIZE_MB = 20  # Максимальный размер загружаемого файла
 
 TTS_VOICE = "ru-RU-DmitryNeural"
 DEFAULT_RATE = "+50%"
@@ -144,8 +143,7 @@ async def index(request: Request):
         "request": request,
         "default_rate": DEFAULT_RATE,
         "storage_stats": stats,
-        "supported_extensions": ", ".join(SUPPORTED_EXTENSIONS),
-        "max_file_size_mb": MAX_FILE_SIZE_MB
+        "supported_extensions": ", ".join(SUPPORTED_EXTENSIONS)
     })
 
 
@@ -220,18 +218,9 @@ async def synthesize_document(
     Принимает файл и параметр скорости, возвращает путь к аудиофайлу.
     """
 
-    # Проверяем размер файла
-    file_size = 0
+    # Читаем содержимое файла
     file_content = await file.read()
-    file_size = len(file_content)
     await file.seek(0)  # Возвращаем указатель в начало
-
-    file_size_mb = file_size / 1024 / 1024
-    if file_size_mb > MAX_FILE_SIZE_MB:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Файл слишком большой ({file_size_mb:.1f} MB). Максимум: {MAX_FILE_SIZE_MB} MB"
-        )
 
     # Проверяем расширение файла
     file_ext = os.path.splitext(file.filename)[1].lower()

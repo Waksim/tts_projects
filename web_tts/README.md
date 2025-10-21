@@ -52,7 +52,6 @@ AUDIO_DIR = "audio"  # Директория для аудио файлов
 
 # Хранилище
 MAX_STORAGE_MB = 500  # Максимальный размер хранилища
-MAX_TEXT_LENGTH = 50000  # Максимальная длина текста
 
 # TTS настройки
 TTS_VOICE = "ru-RU-DmitryNeural"

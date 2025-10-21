@@ -43,6 +43,29 @@ TTS_VOICE = "ru-RU-DmitryNeural"
 TTS_RATE = "+50%"
 TTS_PITCH = "+0Hz"
 
+# Доступные голоса для выбора пользователем
+AVAILABLE_VOICES = {
+    "ru-RU-DmitryNeural": {
+        "name": "👨 Дмитрий (мужской)",
+        "styles": None
+    },
+    "ru-RU-SvetlanaNeural": {
+        "name": "👩 Светлана (женский)",
+        "styles": None
+    },
+    "ru-RU-DariyaNeural": {
+        "name": "👩 Дария (женский)",
+        "styles": ["crisp", "bright", "clear"]
+    }
+}
+
+# Русские названия стилей для голоса Дарии
+VOICE_STYLES = {
+    "crisp": "🎯 Четкий",
+    "bright": "✨ Яркий",
+    "clear": "💎 Чистый"
+}
+
 # Хранилище
 MAX_STORAGE_MB = 500
 

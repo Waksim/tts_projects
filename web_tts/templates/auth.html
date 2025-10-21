@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Авторизация - Web TTS</title>
+    <style>
+        :root {
+            --bg-color: #f0f2f5;
+            --text-color: #1c1e21;
+            --panel-bg: #ffffff;
+            --panel-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            --header-color: #0d2163;
+            --border-color: #ccc;
+            --button-bg: #1877f2;
+            --button-hover: #166fe5;
+            --error-color: #dc3545;
+            --input-focus: #1877f2;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-color: #121212;
+                --text-color: #e0e0e0;
+                --panel-bg: #1e1e1e;
+                --panel-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                --header-color: #bb86fc;
+                --border-color: #444;
+                --button-bg: #3700b3;
+                --button-hover: #6200ee;
+                --input-focus: #bb86fc;
+            }
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .auth-container {
+            max-width: 400px;
+            width: 100%;
+        }
+
+        .panel {
+            background-color: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 40px 30px;
+            box-shadow: var(--panel-shadow);
+            text-align: center;
+        }
+
+        h1 {
+            color: var(--header-color);
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+
+        .subtitle {
+            color: #888;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .error-message {
+            background-color: rgba(220, 53, 69, 0.1);
+            color: var(--error-color);
+            border: 1px solid var(--error-color);
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .form-group {
+            text-align: left;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 14px 16px;
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 16px;
+            background-color: var(--panel-bg);
+            color: var(--text-color);
+            transition: border-color 0.2s;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: var(--input-focus);
+        }
+
+        button {
+            background-color: var(--button-bg);
+            color: white;
+            border: none;
+            padding: 14px 30px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.1s;
+        }
+
+        button:hover {
+            background-color: var(--button-hover);
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        .info-text {
+            margin-top: 20px;
+            font-size: 13px;
+            color: #888;
+            line-height: 1.6;
+        }
+
+        .lock-icon {
+            font-size: 48px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="auth-container">
+        <div class="panel">
+            <div class="lock-icon">🔐</div>
+            <h1>Web TTS</h1>
+            <p class="subtitle">Введите пригласительный код для доступа</p>
+
+            {% if error == 'invalid' %}
+            <div class="error-message">
+                ❌ Неверный пригласительный код. Попробуйте снова.
+            </div>
+            {% endif %}
+
+            <form method="post" action="/login">
+                <div class="form-group">
+                    <label for="invite_code">Пригласительный код:</label>
+                    <input
+                        type="text"
+                        id="invite_code"
+                        name="invite_code"
+                        placeholder="Введите код"
+                        required
+                        autofocus
+                    >
+                </div>
+
+                <button type="submit">Войти</button>
+            </form>
+
+            <p class="info-text">
+                После ввода правильного кода вы получите доступ к сервису озвучивания текста и документов.
+            </p>
+        </div>
+    </div>
+</body>
+</html>

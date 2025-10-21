@@ -197,29 +197,3 @@ def get_voice_selection_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_dariya_style_keyboard() -> InlineKeyboardMarkup:
-    """
-    Создает клавиатуру для выбора стиля голоса Дарии.
-
-    Returns:
-        InlineKeyboardMarkup с кнопками выбора стилей
-    """
-    from config import VOICE_STYLES
-
-    keyboard = []
-
-    # Кнопки для каждого стиля
-    for style_id, style_name in VOICE_STYLES.items():
-        keyboard.append([
-            InlineKeyboardButton(
-                text=style_name,
-                callback_data=f"set_voice_style:{style_id}"
-            )
-        ])
-
-    # Кнопка "Назад"
-    keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data="select_voice")])
-
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-

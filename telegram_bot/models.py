@@ -90,9 +90,8 @@ class UserSettings(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, unique=True, index=True)
     voice_name: Mapped[str] = mapped_column(String(100), nullable=False, default="ru-RU-DmitryNeural")
-    voice_style: Mapped[str] = mapped_column(String(50), nullable=True)  # Для голосов со стилями (напр. Dariya)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     def __repr__(self):
-        return f"<UserSettings(user_id={self.user_id}, voice={self.voice_name}, style={self.voice_style})>"
+        return f"<UserSettings(user_id={self.user_id}, voice={self.voice_name})>"

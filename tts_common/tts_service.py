@@ -6,7 +6,7 @@ TTS Service - основная логика синтеза речи
 import asyncio
 import os
 import time
-from typing import List, Optional
+from typing import List
 
 import edge_tts
 
@@ -88,23 +88,16 @@ async def _synthesize_single_chunk(
     mp3_path: str,
     voice: str = VOICE,
     rate: str = DEFAULT_RATE,
-    pitch: str = DEFAULT_PITCH,
-    style: Optional[str] = None
+    pitch: str = DEFAULT_PITCH
 ) -> bool:
     """
     Надежная функция синтеза одного чанка с повторными попытками и валидацией.
-
-    Args:
-        style: Стиль голоса (например, "crisp", "bright", "clear" для DariyaNeural)
     """
     current_delay = INITIAL_RETRY_DELAY
     for attempt in range(MAX_RETRIES):
         try:
-            # Создаем Communicate с опциональным стилем
-            if style:
-                communicate = edge_tts.Communicate(text=text, voice=voice, rate=rate, pitch=pitch, style=style)
-            else:
-                communicate = edge_tts.Communicate(text=text, voice=voice, rate=rate, pitch=pitch)
+            # Создаем Communicate без стилей (они не поддерживаются edge-tts)
+            communicate = edge_tts.Communicate(text=text, voice=voice, rate=rate, pitch=pitch)
             await asyncio.wait_for(communicate.save(mp3_path), timeout=600.0)
 
             if not os.path.exists(mp3_path):
@@ -146,15 +139,11 @@ async def synthesize_text(
     voice: str = VOICE,
     rate: str = DEFAULT_RATE,
     pitch: str = DEFAULT_PITCH,
-    chunk_limit: int = CHUNK_CHAR_LIMIT,
-    style: Optional[str] = None
+    chunk_limit: int = CHUNK_CHAR_LIMIT
 ) -> bool:
     """
     Основная функция синтеза текста в MP3.
     Автоматически разбивает на чанки, если текст длинный, и сшивает результат.
-
-    Args:
-        style: Стиль голоса (например, "crisp", "bright", "clear" для DariyaNeural)
 
     Args:
         text: Текст для синтеза
@@ -186,7 +175,7 @@ async def synthesize_text(
     # Если один чанк - создаем сразу финальный файл
     if len(chunks) == 1:
         async with TTS_SEMAPHORE:
-            success = await _synthesize_single_chunk(chunks[0], output_path, voice, rate, pitch, style)
+            success = await _synthesize_single_chunk(chunks[0], output_path, voice, rate, pitch)
 
         duration = time.monotonic() - start_time
         print(f"Синтез завершен за {duration:.2f} с. Статус: {'Успех' if success else 'Провал'}")
@@ -204,7 +193,7 @@ async def synthesize_text(
 
         async def synthesize_chunk_task(text_to_synth, path):
             async with TTS_SEMAPHORE:
-                return await _synthesize_single_chunk(text_to_synth, path, voice, rate, pitch, style)
+                return await _synthesize_single_chunk(text_to_synth, path, voice, rate, pitch)
 
         tasks.append(synthesize_chunk_task(chunk_text, part_filepath))
 

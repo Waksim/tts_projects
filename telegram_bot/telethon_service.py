@@ -231,6 +231,35 @@ class TelethonService:
 
         return text.strip() if text.strip() else None
 
+    async def is_user_subscribed(self, user_id: int, channel_id: int) -> bool:
+        """
+        Проверяет, подписан ли пользователь на канал.
+
+        Args:
+            user_id: ID пользователя Telegram
+            channel_id: ID канала
+
+        Returns:
+            True если подписан, False если нет
+        """
+        try:
+            # Получаем entity канала
+            channel = await self.client.get_entity(channel_id)
+
+            # Получаем права пользователя в канале
+            participant = await self.client.get_permissions(channel, user_id)
+
+            # Проверяем, что пользователь не забанен и является участником
+            if participant and not participant.is_banned:
+                return True
+
+            return False
+
+        except Exception as e:
+            logger.error(f"Ошибка при проверке подписки пользователя {user_id} на канал {channel_id}: {e}")
+            # В случае ошибки считаем, что пользователь не подписан
+            return False
+
 
 # Глобальный экземпляр сервиса
 _telethon_service: Optional[TelethonService] = None

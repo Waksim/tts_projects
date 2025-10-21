@@ -38,6 +38,7 @@ from config import (
 from database import init_db
 from handlers import router
 from telethon_service import init_telethon_service, stop_telethon_service
+from middlewares import SubscriptionCheckMiddleware
 
 # Настройка логирования
 logging.basicConfig(
@@ -141,6 +142,11 @@ async def main():
 
     # Создаем Dispatcher с FSM storage
     dp = Dispatcher(storage=MemoryStorage())
+
+    # Регистрируем middleware для проверки подписки
+    subscription_middleware = SubscriptionCheckMiddleware()
+    dp.message.middleware(subscription_middleware)
+    dp.callback_query.middleware(subscription_middleware)
 
     # Регистрируем роутер с обработчиками
     dp.include_router(router)

@@ -11,15 +11,13 @@ from pathlib import Path
 from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     Message,
     FSInputFile,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
     CallbackQuery
 )
 from aiogram.enums import ChatAction
+from aiogram.exceptions import TelegramBadRequest
 import re
 
 # Логгер для handlers
@@ -61,23 +59,21 @@ from database import (
     get_last_voiced_message_id
 )
 from telethon_service import get_telethon_service
+from keyboards import (
+    get_main_menu_keyboard,
+    get_back_button_keyboard,
+    get_posts_count_keyboard,
+    get_my_channels_keyboard,
+    get_messages_count_keyboard,
+    get_my_chats_keyboard
+)
+from states import AddChannelStates, AddChatStates
 
 # Создаем роутер
 router = Router()
 
 # Инициализируем менеджер хранилища
 storage_manager = StorageManager(str(AUDIO_DIR), MAX_STORAGE_MB)
-
-
-# FSM States для диалогов
-class AddChannelStates(StatesGroup):
-    waiting_for_username = State()
-    waiting_for_count = State()
-
-
-class AddChatStates(StatesGroup):
-    waiting_for_identifier = State()
-    waiting_for_count = State()
 
 
 @router.message(Command("start"))
@@ -94,41 +90,26 @@ async def cmd_menu(message: Message):
     await show_main_menu(message)
 
 
-async def show_main_menu(message: Message):
-    """Показывает главное меню с inline кнопками"""
+async def show_main_menu(message: Message, edit: bool = False):
+    """
+    Показывает главное меню с inline кнопками.
+
+    Args:
+        message: Сообщение пользователя
+        edit: Если True, редактирует существующее сообщение
+    """
     user_id = message.from_user.id
+    markup = get_main_menu_keyboard(user_id)
+    text = "🎛 <b>Главное меню</b>\n\nВыберите действие:"
 
-    keyboard = []
-
-    # Кнопки для каналов (доступны всем)
-    keyboard.append([
-        InlineKeyboardButton(text="➕ Добавить канал", callback_data="add_channel"),
-        InlineKeyboardButton(text="📢 Мои каналы", callback_data="my_channels")
-    ])
-
-    keyboard.append([
-        InlineKeyboardButton(text="🔊 Озвучить новые посты", callback_data="voice_new")
-    ])
-
-    # Кнопки для чатов (только для владельца)
-    if is_owner(user_id):
-        keyboard.append([
-            InlineKeyboardButton(text="➕ Добавить чат", callback_data="add_chat"),
-            InlineKeyboardButton(text="💬 Мои чаты", callback_data="my_chats")
-        ])
-
-    keyboard.append([
-        InlineKeyboardButton(text="📊 Статистика", callback_data="stats"),
-        InlineKeyboardButton(text="❓ Помощь", callback_data="help")
-    ])
-
-    markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-    await message.answer(
-        "🎛 <b>Главное меню</b>\n\nВыберите действие:",
-        reply_markup=markup,
-        parse_mode="HTML"
-    )
+    if edit:
+        try:
+            await message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+        except TelegramBadRequest:
+            # Если не удалось отредактировать, отправляем новое
+            await message.answer(text, reply_markup=markup, parse_mode="HTML")
+    else:
+        await message.answer(text, reply_markup=markup, parse_mode="HTML")
 
 
 @router.message(Command("help"))
@@ -921,6 +902,28 @@ async def handle_forwarded(message: Message):
 # ===== CALLBACK HANDLERS ДЛЯ INLINE КНОПОК =====
 
 
+@router.callback_query(F.data == "back_to_main")
+async def callback_back_to_main(callback: CallbackQuery, state: FSMContext):
+    """Возврат в главное меню"""
+    await callback.answer()
+
+    # Очищаем FSM состояние
+    await state.clear()
+
+    # Редактируем сообщение с главным меню
+    await show_main_menu(callback.message, edit=True)
+
+
+@router.callback_query(F.data == "check_subscription")
+async def callback_check_subscription(callback: CallbackQuery):
+    """Проверка подписки на канал при повторном нажатии"""
+    await callback.answer("🔄 Проверяю подписку...", show_alert=False)
+
+    # Принудительно очищаем кэш middleware, просто отправляем главное меню
+    # Middleware автоматически проверит подписку при следующем действии
+    await show_main_menu(callback.message, edit=False)
+
+
 @router.callback_query(F.data == "help")
 async def callback_help(callback: CallbackQuery):
     """Обработчик кнопки Помощь"""
@@ -966,7 +969,11 @@ async def callback_help(callback: CallbackQuery):
 
 💾 Хранилище: {MAX_STORAGE_MB} MB
 """
-    await callback.message.answer(help_text, parse_mode="HTML")
+    # Редактируем сообщение вместо отправки нового
+    try:
+        await callback.message.edit_text(help_text, parse_mode="HTML", reply_markup=get_back_button_keyboard())
+    except TelegramBadRequest:
+        await callback.message.answer(help_text, parse_mode="HTML", reply_markup=get_back_button_keyboard())
 
 
 @router.callback_query(F.data == "stats")
@@ -984,7 +991,11 @@ async def callback_stats(callback: CallbackQuery):
 📁 Файлов: {stats['file_count']}
 ✅ Свободно: {stats['available_mb']:.2f} MB
 """
-    await callback.message.answer(stats_text, parse_mode="HTML")
+    # Редактируем сообщение вместо отправки нового
+    try:
+        await callback.message.edit_text(stats_text, parse_mode="HTML", reply_markup=get_back_button_keyboard())
+    except TelegramBadRequest:
+        await callback.message.answer(stats_text, parse_mode="HTML", reply_markup=get_back_button_keyboard())
 
 
 @router.callback_query(F.data == "add_channel")
@@ -992,77 +1003,45 @@ async def callback_add_channel(callback: CallbackQuery, state: FSMContext):
     """Начинает диалог добавления канала"""
     await callback.answer()
 
-    await callback.message.answer(
+    text = (
         "📢 <b>Добавление канала</b>\n\n"
         "Отправьте username канала (с @ или без)\n"
-        "Например: @svalka_mk\n\n"
-        "Или отправьте /cancel для отмены",
-        parse_mode="HTML"
+        "Например: @svalka_mk"
     )
 
+    # Редактируем сообщение с кнопкой "Назад"
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_back_button_keyboard())
+    except TelegramBadRequest:
+        await callback.message.answer(text, parse_mode="HTML", reply_markup=get_back_button_keyboard())
+
+    # Сохраняем message_id для последующего редактирования
+    await state.update_data(menu_message_id=callback.message.message_id)
     await state.set_state(AddChannelStates.waiting_for_username)
 
 
 @router.message(StateFilter(AddChannelStates.waiting_for_username))
 async def process_channel_username(message: Message, state: FSMContext):
-    """Обрабатывает username канала"""
-    if message.text.startswith('/cancel'):
-        await state.clear()
-        await message.answer("❌ Добавление канала отменено")
-        return
-
+    """Обрабатывает username канала и добавляет его в БД"""
     channel_username = message.text.strip()
-
-    # Сохраняем username в FSM
-    await state.update_data(channel_username=channel_username)
-
-    await message.answer(
-        f"✅ Канал: {channel_username}\n\n"
-        "Теперь отправьте количество последних постов для озвучки\n"
-        "Например: 10\n\n"
-        "Или /cancel для отмены"
-    )
-
-    await state.set_state(AddChannelStates.waiting_for_count)
-
-
-@router.message(StateFilter(AddChannelStates.waiting_for_count))
-async def process_channel_count(message: Message, state: FSMContext):
-    """Обрабатывает количество постов для озвучки"""
-    if message.text.startswith('/cancel'):
-        await state.clear()
-        await message.answer("❌ Добавление канала отменено")
-        return
-
-    try:
-        count = int(message.text.strip())
-        if count <= 0:
-            raise ValueError
-    except ValueError:
-        await message.answer("❌ Пожалуйста, введите положительное число")
-        return
-
-    # Получаем сохраненные данные
-    data = await state.get_data()
-    channel_username = data['channel_username']
-
-    # Очищаем состояние
-    await state.clear()
-
-    # Выполняем добавление канала
     user_id = message.from_user.id
-    processing_msg = await message.answer("⏳ Добавляю канал...")
+
+    # Получаем message_id меню из state
+    data = await state.get_data()
+    menu_message_id = data.get('menu_message_id')
 
     try:
+        # Проверяем существование канала через Telethon
         telethon = await get_telethon_service()
         channel_info = await telethon.get_channel_info(channel_username)
 
         if not channel_info:
-            await processing_msg.edit_text(f"❌ Канал {channel_username} не найден!")
+            await message.answer(f"❌ Канал {channel_username} не найден!")
             return
 
         channel_id, channel_title = channel_info
 
+        # Добавляем канал в БД
         await add_tracked_channel(
             user_id=user_id,
             channel_username=channel_username.lstrip('@'),
@@ -1070,32 +1049,100 @@ async def process_channel_count(message: Message, state: FSMContext):
             channel_title=channel_title
         )
 
-        await processing_msg.edit_text(
-            f"✅ Канал добавлен: {channel_title}\n\n"
-            f"⏳ Озвучиваю последние {count} постов..."
+        # Редактируем меню с выбором количества постов
+        text = (
+            f"✅ Канал добавлен: <b>{channel_title}</b>\n\n"
+            "Выберите количество последних постов для озвучки:"
         )
 
+        keyboard = get_posts_count_keyboard(channel_username.lstrip('@'))
+
+        # Пытаемся отредактировать исходное сообщение меню
+        if menu_message_id:
+            try:
+                await message.bot.edit_message_text(
+                    text=text,
+                    chat_id=message.chat.id,
+                    message_id=menu_message_id,
+                    parse_mode="HTML",
+                    reply_markup=keyboard
+                )
+            except TelegramBadRequest:
+                # Если не удалось, отправляем новое
+                await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+        else:
+            await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+
+        # Удаляем сообщение пользователя с username
+        try:
+            await message.delete()
+        except:
+            pass
+
+        # Очищаем состояние
+        await state.clear()
+
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении канала: {e}")
+        await message.answer(f"❌ Ошибка: {str(e)}")
+
+
+@router.callback_query(F.data.startswith("voice_channel:"))
+async def callback_voice_channel(callback: CallbackQuery):
+    """Озвучивает последние N постов из канала"""
+    await callback.answer()
+
+    # Парсим callback_data: voice_channel:username:count
+    parts = callback.data.split(":")
+    if len(parts) != 3:
+        await callback.message.edit_text("❌ Ошибка: неверный формат данных")
+        return
+
+    channel_username = parts[1]
+    count = int(parts[2])
+    user_id = callback.from_user.id
+
+    # Обновляем сообщение о начале озвучки
+    await callback.message.edit_text(
+        f"⏳ Озвучиваю последние {count} постов из канала @{channel_username}..."
+    )
+
+    try:
+        telethon = await get_telethon_service()
+
+        # Получаем сообщения канала
         messages = await telethon.get_channel_messages(channel_username, limit=count)
 
         if not messages:
-            await processing_msg.edit_text(
-                f"✅ Канал добавлен: {channel_title}\n\n"
-                f"❌ Не найдено сообщений для озвучки."
+            await callback.message.edit_text(
+                f"❌ Не найдено сообщений в канале @{channel_username}"
             )
             return
 
+        # Получаем информацию о канале для source_id
+        channel_info = await telethon.get_channel_info(channel_username)
+        if not channel_info:
+            await callback.message.edit_text(f"❌ Не удалось получить информацию о канале")
+            return
+
+        channel_id, channel_title = channel_info
+
+        # Озвучиваем сообщения
         await voice_messages(
-            message,
+            callback.message,
             messages,
             user_id,
             source_type='channel',
             source_id=channel_id,
-            status_msg=processing_msg
+            status_msg=callback.message
         )
 
+        # После озвучки возвращаемся в главное меню
+        await show_main_menu(callback.message, edit=True)
+
     except Exception as e:
-        logger.error(f"Ошибка при добавлении канала: {e}")
-        await processing_msg.edit_text(f"❌ Ошибка: {str(e)}")
+        logger.error(f"Ошибка при озвучке канала: {e}")
+        await callback.message.edit_text(f"❌ Ошибка: {str(e)}")
 
 
 @router.callback_query(F.data == "add_chat")
@@ -1109,73 +1156,45 @@ async def callback_add_chat(callback: CallbackQuery, state: FSMContext):
 
     await callback.answer()
 
-    await callback.message.answer(
+    text = (
         "💬 <b>Добавление чата</b>\n\n"
         "Отправьте username чата (с @) или ID чата\n"
-        "Например: @friend или 123456789\n\n"
-        "Или отправьте /cancel для отмены",
-        parse_mode="HTML"
+        "Например: @friend или 123456789"
     )
 
+    # Редактируем сообщение с кнопкой "Назад"
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_back_button_keyboard())
+    except TelegramBadRequest:
+        await callback.message.answer(text, parse_mode="HTML", reply_markup=get_back_button_keyboard())
+
+    # Сохраняем message_id для последующего редактирования
+    await state.update_data(menu_message_id=callback.message.message_id)
     await state.set_state(AddChatStates.waiting_for_identifier)
 
 
 @router.message(StateFilter(AddChatStates.waiting_for_identifier))
 async def process_chat_identifier(message: Message, state: FSMContext):
-    """Обрабатывает username/ID чата"""
-    if message.text.startswith('/cancel'):
-        await state.clear()
-        await message.answer("❌ Добавление чата отменено")
-        return
-
+    """Обрабатывает username/ID чата и добавляет его в БД"""
     chat_identifier = message.text.strip()
-
-    await state.update_data(chat_identifier=chat_identifier)
-
-    await message.answer(
-        f"✅ Чат: {chat_identifier}\n\n"
-        "Теперь отправьте количество последних сообщений для озвучки\n"
-        "Например: 15\n\n"
-        "Или /cancel для отмены"
-    )
-
-    await state.set_state(AddChatStates.waiting_for_count)
-
-
-@router.message(StateFilter(AddChatStates.waiting_for_count))
-async def process_chat_count(message: Message, state: FSMContext):
-    """Обрабатывает количество сообщений для озвучки"""
-    if message.text.startswith('/cancel'):
-        await state.clear()
-        await message.answer("❌ Добавление чата отменено")
-        return
-
-    try:
-        count = int(message.text.strip())
-        if count <= 0:
-            raise ValueError
-    except ValueError:
-        await message.answer("❌ Пожалуйста, введите положительное число")
-        return
-
-    data = await state.get_data()
-    chat_identifier = data['chat_identifier']
-
-    await state.clear()
-
     user_id = message.from_user.id
-    processing_msg = await message.answer("⏳ Добавляю чат...")
+
+    # Получаем message_id меню из state
+    data = await state.get_data()
+    menu_message_id = data.get('menu_message_id')
 
     try:
+        # Проверяем существование чата через Telethon
         telethon = await get_telethon_service()
         chat_info = await telethon.get_chat_info(chat_identifier)
 
         if not chat_info:
-            await processing_msg.edit_text(f"❌ Чат {chat_identifier} не найден!")
+            await message.answer(f"❌ Чат {chat_identifier} не найден!")
             return
 
         chat_id, chat_title, chat_username = chat_info
 
+        # Добавляем чат в БД
         await add_tracked_chat(
             user_id=user_id,
             chat_id=chat_id,
@@ -1183,56 +1202,141 @@ async def process_chat_count(message: Message, state: FSMContext):
             chat_title=chat_title
         )
 
-        await processing_msg.edit_text(
-            f"✅ Чат добавлен: {chat_title}\n\n"
-            f"⏳ Озвучиваю последние {count} сообщений..."
+        # Редактируем меню с выбором количества сообщений
+        text = (
+            f"✅ Чат добавлен: <b>{chat_title}</b>\n\n"
+            "Выберите количество последних сообщений для озвучки:"
         )
 
+        keyboard = get_messages_count_keyboard(chat_id)
+
+        # Пытаемся отредактировать исходное сообщение меню
+        if menu_message_id:
+            try:
+                await message.bot.edit_message_text(
+                    text=text,
+                    chat_id=message.chat.id,
+                    message_id=menu_message_id,
+                    parse_mode="HTML",
+                    reply_markup=keyboard
+                )
+            except TelegramBadRequest:
+                # Если не удалось, отправляем новое
+                await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+        else:
+            await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+
+        # Удаляем сообщение пользователя с identifier
+        try:
+            await message.delete()
+        except:
+            pass
+
+        # Очищаем состояние
+        await state.clear()
+
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении чата: {e}")
+        await message.answer(f"❌ Ошибка: {str(e)}")
+
+
+@router.callback_query(F.data.startswith("voice_chat:"))
+async def callback_voice_chat(callback: CallbackQuery):
+    """Озвучивает последние N сообщений из чата"""
+    await callback.answer()
+
+    # Парсим callback_data: voice_chat:chat_id:count
+    parts = callback.data.split(":")
+    if len(parts) != 3:
+        await callback.message.edit_text("❌ Ошибка: неверный формат данных")
+        return
+
+    chat_id = int(parts[1])
+    count = int(parts[2])
+    user_id = callback.from_user.id
+
+    # Обновляем сообщение о начале озвучки
+    await callback.message.edit_text(
+        f"⏳ Озвучиваю последние {count} сообщений из чата..."
+    )
+
+    try:
+        telethon = await get_telethon_service()
+
+        # Получаем сообщения чата
         messages = await telethon.get_chat_messages(chat_id, limit=count)
 
         if not messages:
-            await processing_msg.edit_text(
-                f"✅ Чат добавлен: {chat_title}\n\n"
-                f"❌ Не найдено сообщений для озвучки."
+            await callback.message.edit_text(
+                f"❌ Не найдено сообщений в чате"
             )
             return
 
+        # Озвучиваем сообщения
         await voice_messages(
-            message,
+            callback.message,
             messages,
             user_id,
             source_type='chat',
             source_id=chat_id,
-            status_msg=processing_msg
+            status_msg=callback.message
         )
 
+        # После озвучки возвращаемся в главное меню
+        await show_main_menu(callback.message, edit=True)
+
     except Exception as e:
-        logger.error(f"Ошибка при добавлении чата: {e}")
-        await processing_msg.edit_text(f"❌ Ошибка: {str(e)}")
+        logger.error(f"Ошибка при озвучке чата: {e}")
+        await callback.message.edit_text(f"❌ Ошибка: {str(e)}")
 
 
 @router.callback_query(F.data == "my_channels")
 async def callback_my_channels(callback: CallbackQuery):
-    """Показывает список каналов"""
+    """Показывает список каналов как интерактивные кнопки"""
     await callback.answer()
 
     user_id = callback.from_user.id
     channels = await get_tracked_channels(user_id)
 
     if not channels:
-        await callback.message.answer("У вас нет отслеживаемых каналов.")
+        text = "У вас нет отслеживаемых каналов.\n\nИспользуйте кнопку \"➕ Добавить канал\""
+        try:
+            await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_back_button_keyboard())
+        except TelegramBadRequest:
+            await callback.message.answer(text, parse_mode="HTML", reply_markup=get_back_button_keyboard())
         return
 
-    text = "📢 <b>Ваши отслеживаемые каналы:</b>\n\n"
-    for channel in channels:
-        text += f"• @{channel.channel_username} - {channel.channel_title}\n"
+    text = "📢 <b>Ваши отслеживаемые каналы:</b>\n\nВыберите канал для озвучки постов:"
+    keyboard = get_my_channels_keyboard(channels)
 
-    await callback.message.answer(text, parse_mode="HTML")
+    # Редактируем сообщение
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+    except TelegramBadRequest:
+        await callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+
+
+@router.callback_query(F.data.startswith("channel:"))
+async def callback_channel_select(callback: CallbackQuery):
+    """Обработчик выбора канала из списка - показывает меню выбора количества постов"""
+    await callback.answer()
+
+    # Парсим callback_data: channel:username
+    channel_username = callback.data.split(":", 1)[1]
+
+    text = f"📢 Канал: <b>@{channel_username}</b>\n\nВыберите количество постов для озвучки:"
+    keyboard = get_posts_count_keyboard(channel_username)
+
+    # Редактируем сообщение
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+    except TelegramBadRequest:
+        await callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
 
 
 @router.callback_query(F.data == "my_chats")
 async def callback_my_chats(callback: CallbackQuery):
-    """Показывает список чатов"""
+    """Показывает список чатов как интерактивные кнопки"""
     user_id = callback.from_user.id
 
     if not is_owner(user_id):
@@ -1244,15 +1348,39 @@ async def callback_my_chats(callback: CallbackQuery):
     chats = await get_tracked_chats(user_id)
 
     if not chats:
-        await callback.message.answer("У вас нет отслеживаемых чатов.")
+        text = "У вас нет отслеживаемых чатов.\n\nИспользуйте кнопку \"➕ Добавить чат\""
+        try:
+            await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_back_button_keyboard())
+        except TelegramBadRequest:
+            await callback.message.answer(text, parse_mode="HTML", reply_markup=get_back_button_keyboard())
         return
 
-    text = "💬 <b>Ваши отслеживаемые чаты:</b>\n\n"
-    for chat in chats:
-        username_text = f"@{chat.chat_username}" if chat.chat_username else f"ID: {chat.chat_id}"
-        text += f"• {username_text} - {chat.chat_title}\n"
+    text = "💬 <b>Ваши отслеживаемые чаты:</b>\n\nВыберите чат для озвучки сообщений:"
+    keyboard = get_my_chats_keyboard(chats)
 
-    await callback.message.answer(text, parse_mode="HTML")
+    # Редактируем сообщение
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+    except TelegramBadRequest:
+        await callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+
+
+@router.callback_query(F.data.startswith("chat:"))
+async def callback_chat_select(callback: CallbackQuery):
+    """Обработчик выбора чата из списка - показывает меню выбора количества сообщений"""
+    await callback.answer()
+
+    # Парсим callback_data: chat:chat_id
+    chat_id = int(callback.data.split(":", 1)[1])
+
+    text = f"💬 <b>Чат ID: {chat_id}</b>\n\nВыберите количество сообщений для озвучки:"
+    keyboard = get_messages_count_keyboard(chat_id)
+
+    # Редактируем сообщение
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+    except TelegramBadRequest:
+        await callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
 
 
 @router.callback_query(F.data == "voice_new")
@@ -1261,7 +1389,12 @@ async def callback_voice_new(callback: CallbackQuery):
     await callback.answer()
 
     user_id = callback.from_user.id
-    processing_msg = await callback.message.answer("⏳ Проверяю новые сообщения...")
+
+    # Редактируем сообщение вместо создания нового
+    try:
+        await callback.message.edit_text("⏳ Проверяю новые сообщения...")
+    except TelegramBadRequest:
+        await callback.message.answer("⏳ Проверяю новые сообщения...")
 
     try:
         telethon = await get_telethon_service()
@@ -1273,10 +1406,8 @@ async def callback_voice_new(callback: CallbackQuery):
             chats = await get_tracked_chats(user_id)
 
         if not channels and not chats:
-            await processing_msg.edit_text(
-                "❌ У вас нет отслеживаемых каналов или чатов!\n\n"
-                "Используйте кнопку '➕ Добавить канал' в меню"
-            )
+            text = "❌ У вас нет отслеживаемых каналов или чатов!\n\nИспользуйте кнопку '➕ Добавить канал' в меню"
+            await callback.message.edit_text(text, reply_markup=get_back_button_keyboard())
             return
 
         total_new_messages = 0
@@ -1291,7 +1422,7 @@ async def callback_voice_new(callback: CallbackQuery):
             )
 
             if messages:
-                await processing_msg.edit_text(
+                await callback.message.edit_text(
                     f"📢 Канал: {channel.channel_title}\n"
                     f"⏳ Озвучиваю {len(messages)} новых сообщений..."
                 )
@@ -1317,7 +1448,7 @@ async def callback_voice_new(callback: CallbackQuery):
             )
 
             if messages:
-                await processing_msg.edit_text(
+                await callback.message.edit_text(
                     f"💬 Чат: {chat.chat_title}\n"
                     f"⏳ Озвучиваю {len(messages)} новых сообщений..."
                 )
@@ -1333,11 +1464,21 @@ async def callback_voice_new(callback: CallbackQuery):
 
                 total_new_messages += len(messages)
 
+        # Показываем результат и возвращаемся в главное меню
         if total_new_messages == 0:
-            await processing_msg.edit_text("✅ Нет новых сообщений для озвучки!")
+            await callback.message.edit_text(
+                "✅ Нет новых сообщений для озвучки!",
+                reply_markup=get_back_button_keyboard()
+            )
         else:
-            await processing_msg.edit_text(f"✅ Озвучено {total_new_messages} новых сообщений!")
+            await callback.message.edit_text(
+                f"✅ Озвучено {total_new_messages} новых сообщений!",
+                reply_markup=get_back_button_keyboard()
+            )
 
     except Exception as e:
         logger.error(f"Ошибка при озвучке новых сообщений: {e}")
-        await processing_msg.edit_text(f"❌ Ошибка: {str(e)}")
+        await callback.message.edit_text(
+            f"❌ Ошибка: {str(e)}",
+            reply_markup=get_back_button_keyboard()
+        )

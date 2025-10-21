@@ -62,6 +62,8 @@ from database import (
     get_last_voiced_message_id,
     get_user_voice,
     set_user_voice,
+    get_user_rate,
+    set_user_rate,
     get_user_max_duration,
     set_user_max_duration
 )
@@ -74,6 +76,7 @@ from keyboards import (
     get_messages_count_keyboard,
     get_my_chats_keyboard,
     get_voice_selection_keyboard,
+    get_rate_selection_keyboard,
     get_duration_selection_keyboard
 )
 from states import AddChannelStates, AddChatStates
@@ -83,6 +86,63 @@ router = Router()
 
 # Инициализируем менеджер хранилища
 storage_manager = StorageManager(str(AUDIO_DIR), MAX_STORAGE_MB)
+
+
+# ===== HELPER КЛАСС ДЛЯ УПОРЯДОЧЕННОЙ ОТПРАВКИ ЧАСТЕЙ =====
+
+
+class OrderedPartSender:
+    """
+    Класс для упорядоченной отправки частей аудио по мере их готовности.
+    Гарантирует, что части отправляются в правильном порядке (1, 2, 3, ...),
+    даже если они готовятся параллельно и в произвольном порядке.
+    """
+
+    def __init__(self, message: Message, total_parts: int, title_formatter):
+        """
+        Args:
+            message: Сообщение для отправки аудио
+            total_parts: Общее количество частей
+            title_formatter: Функция для форматирования названия (part_num, total_parts) -> str
+        """
+        self.message = message
+        self.total_parts = total_parts
+        self.title_formatter = title_formatter
+        self.next_to_send = 1  # Следующий номер части для отправки
+        self.ready_parts = {}  # Словарь {part_num: file_path} готовых, но ещё не отправленных частей
+        self.lock = asyncio.Lock()  # Для thread-safe доступа
+
+    async def on_part_ready(self, part_num: int, file_path: str, total_parts: int):
+        """
+        Callback, вызываемый когда часть готова.
+        Отправляет часть если она следующая по порядку, или сохраняет для последующей отправки.
+        """
+        async with self.lock:
+            # Сохраняем готовую часть
+            self.ready_parts[part_num] = file_path
+            print(f"✅ Часть {part_num}/{total_parts} готова к отправке")
+
+            # Отправляем все части которые готовы и идут по порядку
+            while self.next_to_send in self.ready_parts:
+                current_part = self.next_to_send
+                current_file = self.ready_parts.pop(current_part)
+
+                # Формируем название
+                title = self.title_formatter(current_part, self.total_parts)
+
+                # Отправляем
+                try:
+                    audio_file = FSInputFile(current_file)
+                    await self.message.answer_audio(
+                        audio_file,
+                        title=title,
+                        performer="MKttsBOT"
+                    )
+                    print(f"📤 Часть {current_part}/{self.total_parts} отправлена")
+                except Exception as e:
+                    logger.error(f"Ошибка при отправке части {current_part}: {e}")
+
+                self.next_to_send += 1
 
 
 @router.message(Command("start"))
@@ -239,6 +299,7 @@ async def handle_document(message: Message):
 
         # Получаем персональные настройки пользователя
         voice_name = await get_user_voice(user_id)
+        speech_rate = await get_user_rate(user_id)
         max_duration = await get_user_max_duration(user_id)
 
         # Рассчитываем количество частей
@@ -263,37 +324,48 @@ async def handle_document(message: Message):
         estimated_size = len(text) * 300  # Примерная оценка размера файла
         await storage_manager.ensure_space_available_async(estimated_size)
 
-        # Синтезируем с учетом лимита длительности
-        audio_files = await synthesize_text_with_duration_limit(
-            text,
-            str(audio_path),
-            max_duration_minutes=max_duration,
-            voice=voice_name,
-            rate=TTS_RATE,
-            pitch=TTS_PITCH
-        )
+        # Берем имя из имени документа (без расширения)
+        doc_name = os.path.splitext(file_name)[0]
+
+        # Если частей будет больше одной, используем упорядоченную отправку
+        if parts_count > 1:
+            # Создаем sender для упорядоченной отправки
+            def title_formatter(part_num, total):
+                return f"Часть {part_num}/{total} - {doc_name}"
+
+            sender = OrderedPartSender(message, parts_count, title_formatter)
+
+            # Синтезируем с callback для отправки по мере готовности
+            audio_files = await synthesize_text_with_duration_limit(
+                text,
+                str(audio_path),
+                max_duration_minutes=max_duration,
+                voice=voice_name,
+                rate=speech_rate,
+                pitch=TTS_PITCH,
+                on_part_ready=sender.on_part_ready
+            )
+        else:
+            # Обычный синтез без callback
+            audio_files = await synthesize_text_with_duration_limit(
+                text,
+                str(audio_path),
+                max_duration_minutes=max_duration,
+                voice=voice_name,
+                rate=speech_rate,
+                pitch=TTS_PITCH
+            )
 
         if not audio_files:
             raise Exception("Не удалось синтезировать аудио")
 
-        # Отправляем аудиофайлы пользователю
-        await processing_msg.edit_text("📤 Отправляю аудио...")
-
-        # Берем имя из имени документа (без расширения)
-        doc_name = os.path.splitext(file_name)[0]
-
-        for i, audio_file_path in enumerate(audio_files, start=1):
-            audio_file = FSInputFile(audio_file_path)
-
-            # Формируем название с номером части если файлов несколько
-            if len(audio_files) > 1:
-                title = f"{doc_name} - Часть {i}/{len(audio_files)}"
-            else:
-                title = file_name
-
+        # Если одна часть, отправляем её вручную (при множественных уже отправлено через callback)
+        if len(audio_files) == 1:
+            await processing_msg.edit_text("📤 Отправляю аудио...")
+            audio_file = FSInputFile(audio_files[0])
             await message.answer_audio(
                 audio_file,
-                title=title,
+                title=file_name,
                 performer="MKttsBOT"
             )
 
@@ -362,6 +434,7 @@ async def handle_url(message: Message, url: str, user_id: int, username: str):
 
         # Получаем персональные настройки пользователя
         voice_name = await get_user_voice(user_id)
+        speech_rate = await get_user_rate(user_id)
         max_duration = await get_user_max_duration(user_id)
 
         # Рассчитываем количество частей
@@ -386,37 +459,48 @@ async def handle_url(message: Message, url: str, user_id: int, username: str):
         estimated_size = len(text) * 300
         await storage_manager.ensure_space_available_async(estimated_size)
 
-        # Синтезируем с учетом лимита длительности
-        audio_files = await synthesize_text_with_duration_limit(
-            text,
-            str(audio_path),
-            max_duration_minutes=max_duration,
-            voice=voice_name,
-            rate=TTS_RATE,
-            pitch=TTS_PITCH
-        )
+        # Берем первые 7 слов для названия
+        web_title = ' '.join(text.split()[:7])
+
+        # Если частей будет больше одной, используем упорядоченную отправку
+        if parts_count > 1:
+            # Создаем sender для упорядоченной отправки
+            def title_formatter(part_num, total):
+                return f"Часть {part_num}/{total} - {web_title}"
+
+            sender = OrderedPartSender(message, parts_count, title_formatter)
+
+            # Синтезируем с callback для отправки по мере готовности
+            audio_files = await synthesize_text_with_duration_limit(
+                text,
+                str(audio_path),
+                max_duration_minutes=max_duration,
+                voice=voice_name,
+                rate=speech_rate,
+                pitch=TTS_PITCH,
+                on_part_ready=sender.on_part_ready
+            )
+        else:
+            # Обычный синтез без callback
+            audio_files = await synthesize_text_with_duration_limit(
+                text,
+                str(audio_path),
+                max_duration_minutes=max_duration,
+                voice=voice_name,
+                rate=speech_rate,
+                pitch=TTS_PITCH
+            )
 
         if not audio_files:
             raise Exception("Не удалось синтезировать аудио")
 
-        # Отправляем аудиофайлы
-        await processing_msg.edit_text("📤 Отправляю аудио...")
-
-        # Берем первые 7 слов для названия
-        web_title = ' '.join(text.split()[:7])
-
-        for i, audio_file_path in enumerate(audio_files, start=1):
-            audio_file = FSInputFile(audio_file_path)
-
-            # Формируем название с номером части если файлов несколько
-            if len(audio_files) > 1:
-                title = f"{web_title} - Часть {i}/{len(audio_files)}"
-            else:
-                title = web_title
-
+        # Если одна часть, отправляем её вручную (при множественных уже отправлено через callback)
+        if len(audio_files) == 1:
+            await processing_msg.edit_text("📤 Отправляю аудио...")
+            audio_file = FSInputFile(audio_files[0])
             await message.answer_audio(
                 audio_file,
-                title=title,
+                title=web_title,
                 performer="MKttsBOT"
             )
 
@@ -460,6 +544,7 @@ async def handle_plain_text(message: Message, text: str, user_id: int, username:
 
         # Получаем персональные настройки пользователя
         voice_name = await get_user_voice(user_id)
+        speech_rate = await get_user_rate(user_id)
         max_duration = await get_user_max_duration(user_id)
 
         # Рассчитываем количество частей
@@ -480,37 +565,48 @@ async def handle_plain_text(message: Message, text: str, user_id: int, username:
         estimated_size = len(text) * 300
         await storage_manager.ensure_space_available_async(estimated_size)
 
-        # Синтезируем с учетом лимита длительности
-        audio_files = await synthesize_text_with_duration_limit(
-            text,
-            str(audio_path),
-            max_duration_minutes=max_duration,
-            voice=voice_name,
-            rate=TTS_RATE,
-            pitch=TTS_PITCH
-        )
+        # Берем первые 7 слов для названия
+        text_title = ' '.join(text.split()[:7])
+
+        # Если частей будет больше одной, используем упорядоченную отправку
+        if parts_count > 1:
+            # Создаем sender для упорядоченной отправки
+            def title_formatter(part_num, total):
+                return f"Часть {part_num}/{total} - {text_title}"
+
+            sender = OrderedPartSender(message, parts_count, title_formatter)
+
+            # Синтезируем с callback для отправки по мере готовности
+            audio_files = await synthesize_text_with_duration_limit(
+                text,
+                str(audio_path),
+                max_duration_minutes=max_duration,
+                voice=voice_name,
+                rate=speech_rate,
+                pitch=TTS_PITCH,
+                on_part_ready=sender.on_part_ready
+            )
+        else:
+            # Обычный синтез без callback
+            audio_files = await synthesize_text_with_duration_limit(
+                text,
+                str(audio_path),
+                max_duration_minutes=max_duration,
+                voice=voice_name,
+                rate=speech_rate,
+                pitch=TTS_PITCH
+            )
 
         if not audio_files:
             raise Exception("Не удалось синтезировать аудио")
 
-        # Отправляем аудиофайлы
-        await processing_msg.edit_text("📤 Отправляю аудио...")
-
-        # Берем первые 7 слов для названия
-        text_title = ' '.join(text.split()[:7])
-
-        for i, audio_file_path in enumerate(audio_files, start=1):
-            audio_file = FSInputFile(audio_file_path)
-
-            # Формируем название с номером части если файлов несколько
-            if len(audio_files) > 1:
-                title = f"{text_title} - Часть {i}/{len(audio_files)}"
-            else:
-                title = text_title
-
+        # Если одна часть, отправляем её вручную (при множественных уже отправлено через callback)
+        if len(audio_files) == 1:
+            await processing_msg.edit_text("📤 Отправляю аудио...")
+            audio_file = FSInputFile(audio_files[0])
             await message.answer_audio(
                 audio_file,
-                title=title,
+                title=text_title,
                 performer="MKttsBOT"
             )
 
@@ -851,6 +947,7 @@ async def voice_messages(
 
         # Получаем персональные настройки пользователя
         voice_name = await get_user_voice(user_id)
+        speech_rate = await get_user_rate(user_id)
         max_duration = await get_user_max_duration(user_id)
 
         # Рассчитываем количество частей
@@ -875,25 +972,6 @@ async def voice_messages(
         estimated_size = len(combined_text) * 300
         await storage_manager.ensure_space_available_async(estimated_size)
 
-        # Синтезируем с учетом лимита длительности
-        audio_files = await synthesize_text_with_duration_limit(
-            combined_text,
-            str(audio_path),
-            max_duration_minutes=max_duration,
-            voice=voice_name,
-            rate=TTS_RATE,
-            pitch=TTS_PITCH
-        )
-
-        if not audio_files:
-            if status_msg:
-                await status_msg.edit_text("❌ Не удалось синтезировать аудио")
-            return
-
-        # Отправляем аудиофайлы
-        if status_msg:
-            await status_msg.edit_text("📤 Отправляю аудио...")
-
         # Формируем базовое название аудио
         if source_title:
             # Очищаем название от недопустимых символов
@@ -904,19 +982,49 @@ async def voice_messages(
             source_name = "Channel" if source_type == "channel" else "Chat"
             base_title = f"{source_name} ({len(valid_messages)} messages)"
 
-        # Отправляем все части
-        for i, audio_file_path in enumerate(audio_files, start=1):
-            audio_file = FSInputFile(audio_file_path)
+        # Если частей будет больше одной, используем упорядоченную отправку
+        if parts_count > 1:
+            # Создаем sender для упорядоченной отправки
+            def title_formatter(part_num, total):
+                return f"Часть {part_num}/{total} - {base_title}"
 
-            # Добавляем номер части если файлов несколько
-            if len(audio_files) > 1:
-                audio_title = f"{base_title} - Часть {i}/{len(audio_files)}"
-            else:
-                audio_title = base_title
+            sender = OrderedPartSender(message, parts_count, title_formatter)
 
+            # Синтезируем с callback для отправки по мере готовности
+            audio_files = await synthesize_text_with_duration_limit(
+                combined_text,
+                str(audio_path),
+                max_duration_minutes=max_duration,
+                voice=voice_name,
+                rate=speech_rate,
+                pitch=TTS_PITCH,
+                on_part_ready=sender.on_part_ready
+            )
+        else:
+            # Обычный синтез без callback
+            audio_files = await synthesize_text_with_duration_limit(
+                combined_text,
+                str(audio_path),
+                max_duration_minutes=max_duration,
+                voice=voice_name,
+                rate=speech_rate,
+                pitch=TTS_PITCH
+            )
+
+        if not audio_files:
+            if status_msg:
+                await status_msg.edit_text("❌ Не удалось синтезировать аудио")
+            return
+
+        # Если одна часть, отправляем её вручную (при множественных уже отправлено через callback)
+        if len(audio_files) == 1:
+            if status_msg:
+                await status_msg.edit_text("📤 Отправляю аудио...")
+
+            audio_file = FSInputFile(audio_files[0])
             await message.answer_audio(
                 audio_file,
-                title=audio_title,
+                title=base_title,
                 performer="MKttsBOT"
             )
 
@@ -1630,6 +1738,60 @@ async def callback_set_voice(callback: CallbackQuery):
 
     voice_name = AVAILABLE_VOICES[voice_id]["name"]
     text = f"✅ <b>Голос сохранен!</b>\n\n🎤 {voice_name}"
+
+    try:
+        await callback.message.edit_text(
+            text,
+            parse_mode="HTML",
+            reply_markup=get_back_button_keyboard()
+        )
+    except TelegramBadRequest:
+        await callback.message.answer(
+            text,
+            parse_mode="HTML",
+            reply_markup=get_back_button_keyboard()
+        )
+
+
+# ===== ОБРАБОТЧИКИ ВЫБОРА СКОРОСТИ РЕЧИ =====
+
+
+@router.callback_query(F.data == "select_rate")
+async def callback_select_rate(callback: CallbackQuery):
+    """Показывает меню выбора скорости речи"""
+    await callback.answer()
+
+    user_id = callback.from_user.id
+    current_rate = await get_user_rate(user_id)
+
+    # Форматируем текущую настройку
+    from config import AVAILABLE_RATES
+    rate_text = AVAILABLE_RATES.get(current_rate, current_rate)
+
+    text = f"⚡ <b>Скорость речи</b>\n\nТекущая настройка: {rate_text}\n\nВыберите новое значение:"
+    keyboard = get_rate_selection_keyboard()
+
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+    except TelegramBadRequest:
+        await callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+
+
+@router.callback_query(F.data.startswith("set_rate:"))
+async def callback_set_rate(callback: CallbackQuery):
+    """Обрабатывает выбор скорости речи"""
+    await callback.answer()
+
+    # Парсим callback_data: set_rate:rate_value
+    rate_value = callback.data.split(":", 1)[1]
+    user_id = callback.from_user.id
+
+    # Сохраняем настройку
+    await set_user_rate(user_id, rate_value)
+
+    from config import AVAILABLE_RATES
+    rate_label = AVAILABLE_RATES.get(rate_value, rate_value)
+    text = f"✅ <b>Настройка сохранена!</b>\n\n⚡ Скорость речи: {rate_label}"
 
     try:
         await callback.message.edit_text(

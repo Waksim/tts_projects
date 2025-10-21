@@ -166,25 +166,3 @@ def get_my_chats_keyboard(chats: list) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_subscription_keyboard(channel_username: str) -> InlineKeyboardMarkup:
-    """
-    Создает клавиатуру с кнопкой подписки на канал.
-
-    Args:
-        channel_username: Username канала (без @)
-
-    Returns:
-        InlineKeyboardMarkup с кнопкой подписки и проверки
-    """
-    keyboard = [
-        [InlineKeyboardButton(
-            text="📢 Подписаться на канал",
-            url=f"https://t.me/{channel_username}"
-        )],
-        [InlineKeyboardButton(
-            text="✅ Я подписался",
-            callback_data="check_subscription"
-        )]
-    ]
-
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)

@@ -255,6 +255,7 @@ async def set_user_voice(user_id: int, voice_name: str):
     from models import UserSettings
     from sqlalchemy import select
     from datetime import datetime
+    from config import TTS_RATE, DEFAULT_MAX_DURATION_MINUTES
 
     async with async_session_factory() as session:
         # Проверяем существование настроек
@@ -267,10 +268,12 @@ async def set_user_voice(user_id: int, voice_name: str):
             settings.voice_name = voice_name
             settings.updated_at = datetime.utcnow()
         else:
-            # Создаем новые настройки
+            # Создаем новые настройки с дефолтными значениями для всех полей
             settings = UserSettings(
                 user_id=user_id,
-                voice_name=voice_name
+                voice_name=voice_name,
+                speech_rate=TTS_RATE,
+                max_audio_duration_minutes=DEFAULT_MAX_DURATION_MINUTES
             )
             session.add(settings)
 
@@ -296,7 +299,7 @@ async def get_user_rate(user_id: int) -> str:
         result = await session.execute(stmt)
         settings = result.scalar_one_or_none()
 
-        if settings:
+        if settings and settings.speech_rate:
             return settings.speech_rate
         else:
             # Возвращаем дефолтную скорость из config
@@ -314,6 +317,7 @@ async def set_user_rate(user_id: int, speech_rate: str):
     from models import UserSettings
     from sqlalchemy import select
     from datetime import datetime
+    from config import TTS_VOICE, DEFAULT_MAX_DURATION_MINUTES
 
     async with async_session_factory() as session:
         # Проверяем существование настроек
@@ -326,10 +330,12 @@ async def set_user_rate(user_id: int, speech_rate: str):
             settings.speech_rate = speech_rate
             settings.updated_at = datetime.utcnow()
         else:
-            # Создаем новые настройки
+            # Создаем новые настройки с дефолтными значениями для всех полей
             settings = UserSettings(
                 user_id=user_id,
-                speech_rate=speech_rate
+                voice_name=TTS_VOICE,
+                speech_rate=speech_rate,
+                max_audio_duration_minutes=DEFAULT_MAX_DURATION_MINUTES
             )
             session.add(settings)
 
@@ -373,6 +379,7 @@ async def set_user_max_duration(user_id: int, max_duration_minutes: int):
     from models import UserSettings
     from sqlalchemy import select
     from datetime import datetime
+    from config import TTS_VOICE, TTS_RATE
 
     async with async_session_factory() as session:
         # Проверяем существование настроек
@@ -385,9 +392,11 @@ async def set_user_max_duration(user_id: int, max_duration_minutes: int):
             settings.max_audio_duration_minutes = max_duration_minutes
             settings.updated_at = datetime.utcnow()
         else:
-            # Создаем новые настройки
+            # Создаем новые настройки с дефолтными значениями для всех полей
             settings = UserSettings(
                 user_id=user_id,
+                voice_name=TTS_VOICE,
+                speech_rate=TTS_RATE,
                 max_audio_duration_minutes=max_duration_minutes
             )
             session.add(settings)

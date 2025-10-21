@@ -194,10 +194,6 @@ TTS_PITCH = "+0Hz"
 
 # Хранилище
 MAX_STORAGE_MB = 500
-
-# Лимиты
-MAX_TEXT_LENGTH = 50000
-MAX_FILE_SIZE_MB = 20
 ```
 
 ### Web TTS (main.py)
@@ -210,7 +206,6 @@ TTS_PITCH = "+0Hz"
 
 # Хранилище
 MAX_STORAGE_MB = 500
-MAX_TEXT_LENGTH = 50000
 
 # Сервер
 HOST = "0.0.0.0"

@@ -29,6 +29,10 @@ TELETHON_SESSION = os.getenv("TELETHON_SESSION", "")
 # ID владельца бота (для доступа к приватным функциям)
 OWNER_ID = 382202500
 
+# Обязательный канал для доступа к боту
+REQUIRED_CHANNEL_USERNAME = "svalka_mk"
+REQUIRED_CHANNEL_ID = -1001510749345
+
 # Директории
 BASE_DIR = Path(__file__).parent
 AUDIO_DIR = BASE_DIR / "audio"

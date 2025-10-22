@@ -189,35 +189,42 @@ async def synthesize_text(
 
     tasks = []
     part_filepaths = []
+    task_indices = [] # Для сохранения исходного индекса
 
     for i, chunk_text in enumerate(chunks):
         part_filepath = os.path.join(output_dir, f"{filename_base}_part_{i + 1}.mp3")
         part_filepaths.append(part_filepath)
 
-        async def synthesize_chunk_task(text_to_synth, path):
+        async def synthesize_chunk_task(idx, text_to_synth, path): # Передаем idx
             async with TTS_SEMAPHORE:
-                return await _synthesize_single_chunk(text_to_synth, path, voice, rate, pitch)
+                return idx, await _synthesize_single_chunk(text_to_synth, path, voice, rate, pitch)
 
-        tasks.append(synthesize_chunk_task(chunk_text, part_filepath))
+        tasks.append(synthesize_chunk_task(i, chunk_text, part_filepath)) # Передаем i
+        task_indices.append(i) # Сохраняем индекс для сопоставления результатов
 
     # Запускаем все задачи конкурентно
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    created_parts = []
+    parts_dict = {} # {index: filepath}
     all_chunks_succeeded = True
+
     for i, result in enumerate(results):
+        original_idx = task_indices[i] # Получаем исходный индекс
         if isinstance(result, Exception):
-            print(f"❌ Ошибка в задаче синтеза части {i + 1}: {result}", flush=True)
+            print(f"❌ Ошибка в задаче синтеза части {original_idx + 1}: {result}", flush=True)
             all_chunks_succeeded = False
-        elif result is True:
-            created_parts.append(part_filepaths[i])
+        elif result[1] is True: # result[1] - это результат _synthesize_single_chunk
+            parts_dict[original_idx] = part_filepaths[original_idx]
         else:
             all_chunks_succeeded = False
 
+    # Собираем файлы в правильном порядке по индексам
+    created_parts = [parts_dict[i] for i in sorted(parts_dict.keys())]
+
     # Если хотя бы одна часть не удалась, чистим и выходим
-    if not all_chunks_succeeded:
+    if not all_chunks_succeeded or len(created_parts) != len(chunks):
         print(f"❌ Синтез провален. Очистка...", flush=True)
-        for part_file in created_parts:
+        for part_file in part_filepaths: # Чистим все потенциально созданные файлы
             if os.path.exists(part_file):
                 try:
                     os.remove(part_file)
@@ -225,8 +232,8 @@ async def synthesize_text(
                     pass
         return False
 
-    # Сшиваем части
-    created_parts.sort()
+    print(f"   Порядок частей перед сшиванием: {[os.path.basename(p) for p in created_parts]}", flush=True) # Отладочный вывод
+
     final_success = await _merge_mp3_parts(created_parts, output_path)
 
     duration = time.monotonic() - start_time
@@ -348,26 +355,32 @@ async def synthesize_text_with_duration_limit(
     # Запускаем все задачи параллельно
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Собираем успешно созданные файлы в правильном порядке
-    results_dict = {}
+    parts_dict = {} # {part_num: file_path}
+    all_parts_succeeded = True
+
     for result in results:
         if isinstance(result, Exception):
             print(f"❌ Ошибка при синтезе части: {result}", flush=True)
+            all_parts_succeeded = False
         elif result[2]:  # success == True
             part_num, file_path, _ = result
-            results_dict[part_num] = file_path
+            parts_dict[part_num] = file_path
         else:
             print(f"❌ Не удалось синтезировать часть: {result[1]}", flush=True)
+            all_parts_succeeded = False
 
     # Собираем файлы в правильном порядке по номерам частей
+    created_files = []
     for i in range(1, total_parts + 1):
-        if i in results_dict:
-            created_files.append(results_dict[i])
+        if i in parts_dict:
+            created_files.append(parts_dict[i])
+
+    print(f"   Порядок частей перед возвратом: {[os.path.basename(p) for p in created_files]}", flush=True) # Отладочный вывод
 
     # Если не все части созданы успешно, удаляем все
-    if len(created_files) != len(text_parts):
-        print(f"❌ Синтез провален: создано только {len(created_files)} из {len(text_parts)} частей. Очистка...", flush=True)
-        for file_path in created_files:
+    if not all_parts_succeeded or len(created_files) != total_parts:
+        print(f"❌ Синтез провален: создано только {len(created_files)} из {total_parts} частей. Очистка...", flush=True)
+        for file_path in parts_dict.values(): # Чистим только успешно созданные файлы
             if os.path.exists(file_path):
                 try:
                     os.remove(file_path)

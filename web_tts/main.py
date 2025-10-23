@@ -132,6 +132,28 @@ async def login(request: Request, invite_code: str = Form(...)):
         return RedirectResponse(url="/auth?error=invalid", status_code=303)
 
 
+# ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
+
+async def schedule_file_deletion(file_path: Path, delay_minutes: int = 10):
+    """
+    Планирует удаление файла через указанное время.
+
+    Args:
+        file_path: Путь к файлу для удаления
+        delay_minutes: Время задержки перед удалением (в минутах)
+    """
+    await asyncio.sleep(delay_minutes * 60)
+
+    try:
+        if file_path.exists():
+            file_path.unlink()
+            print(f"[Cleanup] Автоматически удален файл: {file_path.name} (через {delay_minutes} минут после создания)")
+        else:
+            print(f"[Cleanup] Файл уже удален: {file_path.name}")
+    except Exception as e:
+        print(f"[Cleanup] Ошибка при удалении файла {file_path.name}: {e}")
+
+
 # ===== ГЛАВНАЯ СТРАНИЦА =====
 
 @app.get("/", response_class=HTMLResponse)
@@ -193,6 +215,9 @@ async def synthesize(
 
         if not success or not audio_path.exists():
             raise Exception("Не удалось синтезировать аудио")
+
+        # Планируем автоматическое удаление файла через 10 минут
+        asyncio.create_task(schedule_file_deletion(audio_path, delay_minutes=10))
 
     except Exception as e:
         # Удаляем файл, если он был создан
@@ -280,6 +305,9 @@ async def synthesize_document(
 
         if not success or not audio_path.exists():
             raise Exception("Не удалось синтезировать аудио")
+
+        # Планируем автоматическое удаление файла через 10 минут
+        asyncio.create_task(schedule_file_deletion(audio_path, delay_minutes=10))
 
         # Возвращаем ID файла
         return {

@@ -47,12 +47,14 @@ from middlewares import SubscriptionCheckMiddleware
 # -----------------------------------------------
 
 # Настройка логирования
+from logging.handlers import RotatingFileHandler
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler('bot.log', encoding='utf-8')
+        RotatingFileHandler('bot.log', maxBytes=10*1024*1024, backupCount=2, encoding='utf-8')
     ]
 )
 

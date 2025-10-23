@@ -6,6 +6,7 @@ import os
 import sys
 import asyncio
 import logging
+import shutil
 from pathlib import Path
 
 from aiogram import Router, F
@@ -139,6 +140,12 @@ class OrderedPartSender:
                         performer="MKttsBOT"
                     )
                     print(f"📤 Часть {current_part}/{self.total_parts} отправлена")
+
+                    # Удаляем файл сразу после отправки
+                    try:
+                        os.remove(current_file)
+                    except OSError:
+                        pass
                 except Exception as e:
                     logger.error(f"Ошибка при отправке части {current_part}: {e}")
 
@@ -302,6 +309,15 @@ async def handle_document(message: Message):
         speech_rate = await get_user_rate(user_id)
         max_duration = await get_user_max_duration(user_id)
 
+        # Проверяем свободное место на диске
+        free_space = shutil.disk_usage("/").free
+        if free_space < 300_000_000:  # < 300MB
+            await processing_msg.edit_text(
+                f"❌ Недостаточно места на сервере ({free_space/1024/1024:.0f} MB свободно).\n\n"
+                "Попробуйте позже или отправьте текст покороче."
+            )
+            return
+
         # Рассчитываем количество частей
         parts_count, avg_duration = calculate_parts_info(text, max_duration)
 
@@ -321,7 +337,9 @@ async def handle_document(message: Message):
         audio_path = AUDIO_DIR / audio_filename
 
         # Проверяем и освобождаем место
-        estimated_size = len(text) * 300  # Примерная оценка размера файла
+        # Коэффициент зависит от скорости речи (медленная речь = больше файл)
+        multiplier = 300 if speech_rate in ["+25%", "+50%", "+75%", "+100%"] else 600
+        estimated_size = len(text) * multiplier * 3  # ×3 для промежуточных файлов
         await storage_manager.ensure_space_available_async(estimated_size)
 
         # Берем имя из имени документа (без расширения)
@@ -368,6 +386,11 @@ async def handle_document(message: Message):
                 title=file_name,
                 performer="MKttsBOT"
             )
+            # Удаляем файл сразу после отправки
+            try:
+                os.remove(audio_files[0])
+            except OSError:
+                pass
 
         # Удаляем сообщение о обработке
         await processing_msg.delete()
@@ -437,6 +460,15 @@ async def handle_url(message: Message, url: str, user_id: int, username: str):
         speech_rate = await get_user_rate(user_id)
         max_duration = await get_user_max_duration(user_id)
 
+        # Проверяем свободное место на диске
+        free_space = shutil.disk_usage("/").free
+        if free_space < 300_000_000:  # < 300MB
+            await processing_msg.edit_text(
+                f"❌ Недостаточно места на сервере ({free_space/1024/1024:.0f} MB свободно).\n\n"
+                "Попробуйте позже или отправьте текст покороче."
+            )
+            return
+
         # Рассчитываем количество частей
         parts_count, avg_duration = calculate_parts_info(text, max_duration)
 
@@ -456,7 +488,9 @@ async def handle_url(message: Message, url: str, user_id: int, username: str):
         audio_path = AUDIO_DIR / audio_filename
 
         # Проверяем и освобождаем место
-        estimated_size = len(text) * 300
+        # Коэффициент зависит от скорости речи (медленная речь = больше файл)
+        multiplier = 300 if speech_rate in ["+25%", "+50%", "+75%", "+100%"] else 600
+        estimated_size = len(text) * multiplier * 3  # ×3 для промежуточных файлов
         await storage_manager.ensure_space_available_async(estimated_size)
 
         # Берем первые 7 слов для названия
@@ -503,6 +537,11 @@ async def handle_url(message: Message, url: str, user_id: int, username: str):
                 title=web_title,
                 performer="MKttsBOT"
             )
+            # Удаляем файл сразу после отправки
+            try:
+                os.remove(audio_files[0])
+            except OSError:
+                pass
 
         await processing_msg.delete()
 
@@ -547,6 +586,15 @@ async def handle_plain_text(message: Message, text: str, user_id: int, username:
         speech_rate = await get_user_rate(user_id)
         max_duration = await get_user_max_duration(user_id)
 
+        # Проверяем свободное место на диске
+        free_space = shutil.disk_usage("/").free
+        if free_space < 300_000_000:  # < 300MB
+            await processing_msg.edit_text(
+                f"❌ Недостаточно места на сервере ({free_space/1024/1024:.0f} MB свободно).\n\n"
+                "Попробуйте позже или отправьте текст покороче."
+            )
+            return
+
         # Рассчитываем количество частей
         parts_count, avg_duration = calculate_parts_info(text, max_duration)
 
@@ -562,7 +610,9 @@ async def handle_plain_text(message: Message, text: str, user_id: int, username:
         audio_path = AUDIO_DIR / audio_filename
 
         # Проверяем и освобождаем место
-        estimated_size = len(text) * 300
+        # Коэффициент зависит от скорости речи (медленная речь = больше файл)
+        multiplier = 300 if speech_rate in ["+25%", "+50%", "+75%", "+100%"] else 600
+        estimated_size = len(text) * multiplier * 3  # ×3 для промежуточных файлов
         await storage_manager.ensure_space_available_async(estimated_size)
 
         # Берем первые 7 слов для названия
@@ -609,6 +659,11 @@ async def handle_plain_text(message: Message, text: str, user_id: int, username:
                 title=text_title,
                 performer="MKttsBOT"
             )
+            # Удаляем файл сразу после отправки
+            try:
+                os.remove(audio_files[0])
+            except OSError:
+                pass
 
         # Удаляем сообщение о обработке
         await processing_msg.delete()
@@ -950,6 +1005,16 @@ async def voice_messages(
         speech_rate = await get_user_rate(user_id)
         max_duration = await get_user_max_duration(user_id)
 
+        # Проверяем свободное место на диске
+        free_space = shutil.disk_usage("/").free
+        if free_space < 300_000_000:  # < 300MB
+            if status_msg:
+                await status_msg.edit_text(
+                    f"❌ Недостаточно места на сервере ({free_space/1024/1024:.0f} MB свободно).\n\n"
+                    "Попробуйте позже."
+                )
+            return
+
         # Рассчитываем количество частей
         parts_count, avg_duration = calculate_parts_info(combined_text, max_duration)
 
@@ -969,7 +1034,9 @@ async def voice_messages(
         audio_path = AUDIO_DIR / audio_filename
 
         # Проверяем и освобождаем место
-        estimated_size = len(combined_text) * 300
+        # Коэффициент зависит от скорости речи (медленная речь = больше файл)
+        multiplier = 300 if speech_rate in ["+25%", "+50%", "+75%", "+100%"] else 600
+        estimated_size = len(combined_text) * multiplier * 3  # ×3 для промежуточных файлов
         await storage_manager.ensure_space_available_async(estimated_size)
 
         # Формируем базовое название аудио
@@ -1027,6 +1094,11 @@ async def voice_messages(
                 title=base_title,
                 performer="MKttsBOT"
             )
+            # Удаляем файл сразу после отправки
+            try:
+                os.remove(audio_files[0])
+            except OSError:
+                pass
 
         # Сохраняем в БД информацию о последнем озвученном сообщении
         last_msg_id = valid_messages[-1][0]

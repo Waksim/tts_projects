@@ -1792,9 +1792,11 @@ async def cmd_add_user(message: Message):
     Формат: /add_user <user_id|@username>
     """
     user_id = message.from_user.id
+    logger.info(f"cmd_add_user called by user_id={user_id}, OWNER_ID={OWNER_ID}")
 
     # Проверяем права доступа
     if not is_owner(user_id):
+        logger.warning(f"Access denied for user_id={user_id} (not owner)")
         await message.answer("❌ Эта команда доступна только владельцу бота!")
         return
 

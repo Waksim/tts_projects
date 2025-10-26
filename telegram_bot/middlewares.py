@@ -36,8 +36,13 @@ class SubscriptionCheckMiddleware(BaseMiddleware):
         user_id = event.from_user.id
         bot: Bot = data['bot']  # Получаем объект бота из контекста
 
+        # Логируем для отладки
+        if isinstance(event, Message) and event.text:
+            logger.info(f"Middleware: user_id={user_id}, OWNER_ID={OWNER_ID}, text='{event.text[:50]}'")
+
         # Владелец бота имеет полный доступ без проверок
         if user_id == OWNER_ID:
+            logger.info(f"Owner detected! Allowing access for user_id={user_id}")
             return await handler(event, data)
 
         # Проверяем белый список

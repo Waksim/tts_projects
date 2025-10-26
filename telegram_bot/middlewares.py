@@ -36,7 +36,15 @@ class SubscriptionCheckMiddleware(BaseMiddleware):
         user_id = event.from_user.id
         bot: Bot = data['bot']  # Получаем объект бота из контекста
 
-        # Проверяем кэш
+        # Проверяем белый список
+        from database import is_user_whitelisted
+        is_whitelisted = await is_user_whitelisted(user_id)
+
+        if is_whitelisted:
+            # Пользователь в белом списке - пропускаем проверку подписки
+            return await handler(event, data)
+
+        # Проверяем кэш подписки
         cached_sub = self._subscription_cache.get(user_id)
         if cached_sub:
             is_subscribed, check_time = cached_sub
@@ -53,7 +61,7 @@ class SubscriptionCheckMiddleware(BaseMiddleware):
 
             if is_subscribed:
                 return await handler(event, data)
-            
+
             # Пользователь не подписан
             await self._send_subscription_message(event)
             return None  # Прерываем выполнение

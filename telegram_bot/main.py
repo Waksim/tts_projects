@@ -86,6 +86,9 @@ async def set_bot_commands(bot: Bot):
     owner_commands = user_commands + [
         BotCommand(command="add_chat", description="💬 Добавить чат (админ)"),
         BotCommand(command="my_chats", description="📜 Мои чаты (админ)"),
+        BotCommand(command="add_user", description="➕ Добавить пользователя (админ)"),
+        BotCommand(command="remove_user", description="➖ Удалить пользователя (админ)"),
+        BotCommand(command="user_list", description="📝 Список пользователей (админ)"),
     ]
     await bot.set_my_commands(owner_commands, scope=BotCommandScopeChat(chat_id=OWNER_ID))
     logger.info(f"✓ Установлены расширенные команды для владельца (ID: {OWNER_ID}).")

@@ -274,6 +274,40 @@ class TelethonService:
             # В случае ошибки считаем, что пользователь не подписан
             return False
 
+    async def get_user_info(self, identifier: str) -> Optional[Tuple[int, Optional[str], Optional[str], Optional[str]]]:
+        """
+        Получает информацию о пользователе по username или ID.
+
+        Args:
+            identifier: Username (с @) или ID пользователя
+
+        Returns:
+            Tuple[user_id, username, first_name, last_name] или None если не найден
+        """
+        try:
+            # Пробуем преобразовать в int (если это ID)
+            try:
+                user_id = int(identifier)
+                entity = await self.client.get_entity(user_id)
+            except ValueError:
+                # Это username
+                username = identifier.lstrip('@')
+                entity = await self.client.get_entity(username)
+
+            # Проверяем, что это пользователь
+            if isinstance(entity, User):
+                username = entity.username if hasattr(entity, 'username') else None
+                first_name = entity.first_name if hasattr(entity, 'first_name') else None
+                last_name = entity.last_name if hasattr(entity, 'last_name') else None
+                return (entity.id, username, first_name, last_name)
+            else:
+                logger.warning(f"Entity {identifier} не является пользователем, а {type(entity)}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Ошибка при получении информации о пользователе {identifier}: {e}")
+            return None
+
 
 # Глобальный экземпляр сервиса
 _telethon_service: Optional[TelethonService] = None

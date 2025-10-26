@@ -10,7 +10,7 @@ from aiogram import BaseMiddleware, Bot
 from aiogram.types import Message, CallbackQuery
 from aiogram.exceptions import TelegramBadRequest
 
-from config import REQUIRED_CHANNEL_ID
+from config import REQUIRED_CHANNEL_ID, OWNER_ID
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,10 @@ class SubscriptionCheckMiddleware(BaseMiddleware):
     ) -> Any:
         user_id = event.from_user.id
         bot: Bot = data['bot']  # Получаем объект бота из контекста
+
+        # Владелец бота имеет полный доступ без проверок
+        if user_id == OWNER_ID:
+            return await handler(event, data)
 
         # Проверяем белый список
         from database import is_user_whitelisted

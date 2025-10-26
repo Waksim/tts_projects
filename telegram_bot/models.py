@@ -97,3 +97,20 @@ class UserSettings(Base):
 
     def __repr__(self):
         return f"<UserSettings(user_id={self.user_id}, voice={self.voice_name}, rate={self.speech_rate}, max_duration={self.max_audio_duration_minutes})>"
+
+
+class WhitelistedUser(Base):
+    """Модель для хранения пользователей из белого списка."""
+
+    __tablename__ = "whitelisted_users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, unique=True, index=True)
+    username: Mapped[str] = mapped_column(String(255), nullable=True)
+    first_name: Mapped[str] = mapped_column(String(255), nullable=True)
+    last_name: Mapped[str] = mapped_column(String(255), nullable=True)
+    added_by: Mapped[int] = mapped_column(BigInteger, nullable=False)  # ID админа, который добавил
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    def __repr__(self):
+        return f"<WhitelistedUser(user_id={self.user_id}, username={self.username})>"

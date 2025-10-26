@@ -66,7 +66,10 @@ from database import (
     get_user_rate,
     set_user_rate,
     get_user_max_duration,
-    set_user_max_duration
+    set_user_max_duration,
+    add_whitelisted_user,
+    remove_whitelisted_user,
+    get_all_whitelisted_users
 )
 from telethon_service import get_telethon_service
 from keyboards import (
@@ -1777,6 +1780,167 @@ async def callback_voice_new(callback: CallbackQuery):
             f"❌ Ошибка: {str(e)}",
             reply_markup=get_back_button_keyboard()
         )
+
+
+# ===== КОМАНДЫ УПРАВЛЕНИЯ БЕЛЫМ СПИСКОМ (ТОЛЬКО ДЛЯ ВЛАДЕЛЬЦА) =====
+
+
+@router.message(Command("add_user"))
+async def cmd_add_user(message: Message):
+    """
+    Обработчик команды /add_user (только для владельца).
+    Формат: /add_user <user_id|@username>
+    """
+    user_id = message.from_user.id
+
+    # Проверяем права доступа
+    if not is_owner(user_id):
+        await message.answer("❌ Эта команда доступна только владельцу бота!")
+        return
+
+    # Парсим команду
+    text = message.text.strip()
+    parts = text.split()
+
+    if len(parts) < 2:
+        await message.answer(
+            "❌ Неверный формат команды!\n\n"
+            "Используйте: /add_user <user_id|@username>\n"
+            "Например: /add_user @XDmarina или /add_user 511772312"
+        )
+        return
+
+    identifier = parts[1]
+    processing_msg = await message.answer("⏳ Добавляю пользователя в белый список...")
+
+    try:
+        # Получаем сервис Telethon
+        telethon = await get_telethon_service()
+
+        # Получаем информацию о пользователе
+        user_info = await telethon.get_user_info(identifier)
+
+        if not user_info:
+            await processing_msg.edit_text(f"❌ Пользователь {identifier} не найден!")
+            return
+
+        target_user_id, username, first_name, last_name = user_info
+
+        # Добавляем в белый список
+        await add_whitelisted_user(
+            user_id=target_user_id,
+            added_by=user_id,
+            username=username,
+            first_name=first_name,
+            last_name=last_name
+        )
+
+        # Формируем имя для отображения
+        display_name = f"{first_name or ''} {last_name or ''}".strip()
+        if username:
+            display_name = f"@{username}" + (f" ({display_name})" if display_name else "")
+        elif not display_name:
+            display_name = f"ID: {target_user_id}"
+
+        await processing_msg.edit_text(
+            f"✅ Пользователь добавлен в белый список!\n\n"
+            f"👤 {display_name}\n"
+            f"🆔 ID: {target_user_id}"
+        )
+
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении пользователя в белый список: {e}")
+        await processing_msg.edit_text(f"❌ Ошибка при добавлении пользователя: {str(e)}")
+
+
+@router.message(Command("remove_user"))
+async def cmd_remove_user(message: Message):
+    """
+    Обработчик команды /remove_user (только для владельца).
+    Формат: /remove_user <user_id|@username>
+    """
+    user_id = message.from_user.id
+
+    # Проверяем права доступа
+    if not is_owner(user_id):
+        await message.answer("❌ Эта команда доступна только владельцу бота!")
+        return
+
+    # Парсим команду
+    text = message.text.strip()
+    parts = text.split()
+
+    if len(parts) < 2:
+        await message.answer(
+            "❌ Неверный формат команды!\n\n"
+            "Используйте: /remove_user <user_id|@username>\n"
+            "Например: /remove_user @XDmarina или /remove_user 511772312"
+        )
+        return
+
+    identifier = parts[1]
+    processing_msg = await message.answer("⏳ Удаляю пользователя из белого списка...")
+
+    try:
+        # Удаляем из белого списка
+        was_removed = await remove_whitelisted_user(identifier)
+
+        if was_removed:
+            await processing_msg.edit_text(
+                f"✅ Пользователь {identifier} удален из белого списка!"
+            )
+        else:
+            await processing_msg.edit_text(
+                f"❌ Пользователь {identifier} не найден в белом списке!"
+            )
+
+    except Exception as e:
+        logger.error(f"Ошибка при удалении пользователя из белого списка: {e}")
+        await processing_msg.edit_text(f"❌ Ошибка при удалении пользователя: {str(e)}")
+
+
+@router.message(Command("user_list"))
+async def cmd_user_list(message: Message):
+    """Показывает список всех пользователей в белом списке (только для владельца)."""
+    user_id = message.from_user.id
+
+    # Проверяем права доступа
+    if not is_owner(user_id):
+        await message.answer("❌ Эта команда доступна только владельцу бота!")
+        return
+
+    try:
+        whitelisted_users = await get_all_whitelisted_users()
+
+        if not whitelisted_users:
+            await message.answer("📝 Белый список пустой.")
+            return
+
+        text = "📝 <b>Пользователи в белом списке:</b>\n\n"
+
+        for idx, user in enumerate(whitelisted_users, 1):
+            # Формируем имя пользователя
+            display_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+            username_part = f"@{user.username}" if user.username else ""
+
+            if username_part and display_name:
+                full_name = f"{username_part} ({display_name})"
+            elif username_part:
+                full_name = username_part
+            elif display_name:
+                full_name = display_name
+            else:
+                full_name = f"ID: {user.user_id}"
+
+            text += f"{idx}. {full_name}\n"
+            text += f"   🆔 ID: {user.user_id}\n"
+            text += f"   📅 Добавлен: {user.created_at.strftime('%d.%m.%Y %H:%M')}\n\n"
+
+        await message.answer(text, parse_mode="HTML")
+
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка пользователей: {e}")
+        await message.answer(f"❌ Ошибка при получении списка: {str(e)}")
 
 
 # ===== ОБРАБОТЧИКИ ВЫБОРА ГОЛОСА =====

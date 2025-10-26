@@ -402,3 +402,116 @@ async def set_user_max_duration(user_id: int, max_duration_minutes: int):
             session.add(settings)
 
         await session.commit()
+
+
+# CRUD функции для работы с белым списком пользователей
+
+async def is_user_whitelisted(user_id: int) -> bool:
+    """
+    Проверяет, находится ли пользователь в белом списке.
+
+    Args:
+        user_id: ID пользователя
+
+    Returns:
+        True если пользователь в белом списке, False иначе
+    """
+    from models import WhitelistedUser
+    from sqlalchemy import select
+
+    async with async_session_factory() as session:
+        stmt = select(WhitelistedUser).where(WhitelistedUser.user_id == user_id)
+        result = await session.execute(stmt)
+        user = result.scalar_one_or_none()
+        return user is not None
+
+
+async def add_whitelisted_user(
+    user_id: int,
+    added_by: int,
+    username: str = None,
+    first_name: str = None,
+    last_name: str = None
+):
+    """
+    Добавляет пользователя в белый список.
+
+    Args:
+        user_id: ID пользователя
+        added_by: ID админа, который добавил
+        username: Username пользователя (опционально)
+        first_name: Имя пользователя (опционально)
+        last_name: Фамилия пользователя (опционально)
+    """
+    from models import WhitelistedUser
+    from sqlalchemy import select
+
+    async with async_session_factory() as session:
+        # Проверяем, не добавлен ли уже
+        stmt = select(WhitelistedUser).where(WhitelistedUser.user_id == user_id)
+        result = await session.execute(stmt)
+        existing = result.scalar_one_or_none()
+
+        if existing:
+            # Обновляем существующую запись
+            existing.username = username
+            existing.first_name = first_name
+            existing.last_name = last_name
+            existing.added_by = added_by
+        else:
+            # Создаем новую запись
+            whitelisted_user = WhitelistedUser(
+                user_id=user_id,
+                username=username,
+                first_name=first_name,
+                last_name=last_name,
+                added_by=added_by
+            )
+            session.add(whitelisted_user)
+
+        await session.commit()
+
+
+async def remove_whitelisted_user(identifier: str):
+    """
+    Удаляет пользователя из белого списка.
+
+    Args:
+        identifier: ID пользователя или username (с @ или без)
+
+    Returns:
+        True если пользователь был удален, False если не найден
+    """
+    from models import WhitelistedUser
+    from sqlalchemy import select, delete
+
+    async with async_session_factory() as session:
+        # Пробуем интерпретировать как ID
+        try:
+            user_id = int(identifier)
+            stmt = delete(WhitelistedUser).where(WhitelistedUser.user_id == user_id)
+        except ValueError:
+            # Это username
+            username = identifier.lstrip('@')
+            stmt = delete(WhitelistedUser).where(WhitelistedUser.username == username)
+
+        result = await session.execute(stmt)
+        await session.commit()
+
+        return result.rowcount > 0
+
+
+async def get_all_whitelisted_users():
+    """
+    Возвращает список всех пользователей из белого списка.
+
+    Returns:
+        List[WhitelistedUser]
+    """
+    from models import WhitelistedUser
+    from sqlalchemy import select
+
+    async with async_session_factory() as session:
+        stmt = select(WhitelistedUser).order_by(WhitelistedUser.created_at.desc())
+        result = await session.execute(stmt)
+        return result.scalars().all()

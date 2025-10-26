@@ -427,16 +427,12 @@ async def handle_document(message: Message):
             os.remove(temp_file_path)
 
 
-@router.message(F.text, StateFilter(None))
+@router.message(F.text & ~F.text.startswith('/'), StateFilter(None))
 async def handle_text(message: Message):
     """Обработчик текстовых сообщений (текст или URL)"""
     text = message.text.strip()
     user_id = message.from_user.id
     username = message.from_user.username or message.from_user.first_name
-
-    # Пропускаем команды
-    if text.startswith('/'):
-        return
 
     # Проверяем, является ли текст URL
     if is_valid_url(text):

@@ -190,12 +190,14 @@ async def periodic_cleanup():
     """Background task to cleanup old files from Google Drive and database."""
     from google_drive.config import FILE_RETENTION_DAYS
 
+    # Wait before first cleanup (1 hour after startup)
+    await asyncio.sleep(60 * 60)
+
     while True:
         try:
-            # Run cleanup every 6 hours
-            await asyncio.sleep(6 * 60 * 60)
-
             if drive_service is None or db_manager is None:
+                # If services not available, wait and retry
+                await asyncio.sleep(60 * 60)
                 continue
 
             print(f"[Cleanup] Starting periodic cleanup...")
@@ -204,10 +206,16 @@ async def periodic_cleanup():
             old_records = db_manager.get_old_records(days=FILE_RETENTION_DAYS)
 
             deleted_count = 0
+            loop = asyncio.get_event_loop()
+
             for record in old_records:
                 try:
-                    # Delete from Google Drive
-                    success = drive_service.delete_file(record.drive_file_id)
+                    # Delete from Google Drive (run in executor)
+                    success = await loop.run_in_executor(
+                        None,
+                        drive_service.delete_file,
+                        record.drive_file_id
+                    )
                     if success:
                         # Delete from database
                         db_manager.delete_record(record.file_id)
@@ -217,11 +225,16 @@ async def periodic_cleanup():
 
             print(f"[Cleanup] Deleted {deleted_count} old files")
 
+            # Run cleanup every 6 hours
+            await asyncio.sleep(6 * 60 * 60)
+
         except asyncio.CancelledError:
             print(f"[Cleanup] Cleanup task cancelled")
             break
         except Exception as e:
             print(f"[Cleanup] Error in cleanup task: {e}")
+            # Wait before retry on error
+            await asyncio.sleep(60 * 60)
 
 
 # ===== ГЛАВНАЯ СТРАНИЦА =====
@@ -294,7 +307,11 @@ async def synthesize(
         drive_file_id = None
         if drive_service is not None:
             try:
-                drive_file_id = drive_service.upload_file(
+                # Run upload in executor to avoid blocking event loop
+                loop = asyncio.get_event_loop()
+                drive_file_id = await loop.run_in_executor(
+                    None,
+                    drive_service.upload_file,
                     str(audio_path),
                     audio_filename
                 )
@@ -418,7 +435,11 @@ async def synthesize_document(
         drive_file_id = None
         if drive_service is not None:
             try:
-                drive_file_id = drive_service.upload_file(
+                # Run upload in executor to avoid blocking event loop
+                loop = asyncio.get_event_loop()
+                drive_file_id = await loop.run_in_executor(
+                    None,
+                    drive_service.upload_file,
                     str(audio_path),
                     audio_filename
                 )
@@ -510,7 +531,13 @@ async def get_audio(request: Request, file_id: str):
 
     # Получаем файл из Google Drive
     try:
-        file_content = drive_service.get_file_content(record.drive_file_id)
+        # Run download in executor to avoid blocking event loop
+        loop = asyncio.get_event_loop()
+        file_content = await loop.run_in_executor(
+            None,
+            drive_service.get_file_content,
+            record.drive_file_id
+        )
 
         if file_content is None:
             raise HTTPException(status_code=404, detail="Файл не найден в хранилище")

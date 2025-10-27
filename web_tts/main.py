@@ -28,6 +28,10 @@ load_dotenv()
 from tts_common import synthesize_text, StorageManager, parse_document
 from tts_common.document_parser import SUPPORTED_EXTENSIONS
 
+# Google Drive integration
+from google_drive import get_drive_service
+from database import get_db_manager
+
 # Конфигурация
 BASE_DIR = Path(__file__).parent
 AUDIO_DIR = BASE_DIR / "audio"
@@ -48,8 +52,12 @@ AUTH_COOKIE_NAME = "tts_auth_token"
 # Генерируем секретный токен для авторизованных пользователей
 AUTH_TOKEN = hashlib.sha256(INVITE_CODE.encode()).hexdigest()
 
-# Инициализация менеджера хранилища
+# Инициализация менеджера хранилища (теперь только для temp файлов)
 storage_manager = StorageManager(str(AUDIO_DIR), MAX_STORAGE_MB)
+
+# Инициализация Google Drive и Database (lazy init)
+drive_service = None
+db_manager = None
 
 
 # Middleware для проверки авторизации
@@ -75,16 +83,60 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+def get_user_id_from_request(request: Request) -> str:
+    """Extract user ID from auth cookie.
+
+    Args:
+        request: FastAPI request object
+
+    Returns:
+        User ID (hash of auth token)
+    """
+    auth_token = request.cookies.get(AUTH_COOKIE_NAME, "anonymous")
+    # Use hash of auth token as user ID
+    user_id = hashlib.sha256(auth_token.encode()).hexdigest()[:16]
+    return user_id
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle manager для приложения"""
+    global drive_service, db_manager
+
     # Создаем необходимые директории
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Инициализация сервисов
+    try:
+        drive_service = get_drive_service()
+        print(f"[INFO] Google Drive service initialized")
+    except Exception as e:
+        print(f"[WARNING] Google Drive not available: {e}")
+        print(f"[WARNING] Running without Google Drive integration")
+
+    try:
+        db_manager = get_db_manager()
+        print(f"[INFO] Database initialized")
+    except Exception as e:
+        print(f"[ERROR] Database initialization failed: {e}")
+
     print(f"[INFO] Директория для аудио: {AUDIO_DIR}")
     print(f"[INFO] Пригласительный код: {INVITE_CODE}")
     print(f"[INFO] Приложение запущено")
+
+    # Start cleanup task
+    cleanup_task = asyncio.create_task(periodic_cleanup())
+
     yield
+
+    # Cancel cleanup task on shutdown
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
+
     print(f"[INFO] Приложение остановлено")
 
 
@@ -134,24 +186,42 @@ async def login(request: Request, invite_code: str = Form(...)):
 
 # ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
 
-async def schedule_file_deletion(file_path: Path, delay_minutes: int = 10):
-    """
-    Планирует удаление файла через указанное время.
+async def periodic_cleanup():
+    """Background task to cleanup old files from Google Drive and database."""
+    from google_drive.config import FILE_RETENTION_DAYS
 
-    Args:
-        file_path: Путь к файлу для удаления
-        delay_minutes: Время задержки перед удалением (в минутах)
-    """
-    await asyncio.sleep(delay_minutes * 60)
+    while True:
+        try:
+            # Run cleanup every 6 hours
+            await asyncio.sleep(6 * 60 * 60)
 
-    try:
-        if file_path.exists():
-            file_path.unlink()
-            print(f"[Cleanup] Автоматически удален файл: {file_path.name} (через {delay_minutes} минут после создания)")
-        else:
-            print(f"[Cleanup] Файл уже удален: {file_path.name}")
-    except Exception as e:
-        print(f"[Cleanup] Ошибка при удалении файла {file_path.name}: {e}")
+            if drive_service is None or db_manager is None:
+                continue
+
+            print(f"[Cleanup] Starting periodic cleanup...")
+
+            # Get old records from database
+            old_records = db_manager.get_old_records(days=FILE_RETENTION_DAYS)
+
+            deleted_count = 0
+            for record in old_records:
+                try:
+                    # Delete from Google Drive
+                    success = drive_service.delete_file(record.drive_file_id)
+                    if success:
+                        # Delete from database
+                        db_manager.delete_record(record.file_id)
+                        deleted_count += 1
+                except Exception as e:
+                    print(f"[Cleanup] Error deleting {record.file_id}: {e}")
+
+            print(f"[Cleanup] Deleted {deleted_count} old files")
+
+        except asyncio.CancelledError:
+            print(f"[Cleanup] Cleanup task cancelled")
+            break
+        except Exception as e:
+            print(f"[Cleanup] Error in cleanup task: {e}")
 
 
 # ===== ГЛАВНАЯ СТРАНИЦА =====
@@ -171,6 +241,7 @@ async def index(request: Request):
 
 @app.post("/synthesize")
 async def synthesize(
+    request: Request,
     text: str = Form(...),
     rate: str = Form(DEFAULT_RATE)
 ):
@@ -178,6 +249,9 @@ async def synthesize(
     Эндпоинт для синтеза речи из текста.
     Принимает текст и параметр скорости, возвращает путь к аудиофайлу.
     """
+
+    # Получаем user_id
+    user_id = get_user_id_from_request(request)
 
     # Валидация текста
     if not text or not text.strip():
@@ -199,7 +273,7 @@ async def synthesize(
     audio_filename = f"{file_id}.mp3"
     audio_path = AUDIO_DIR / audio_filename
 
-    # Проверяем и освобождаем место
+    # Проверяем и освобождаем место (для temp файла)
     estimated_size = len(text) * 300  # Примерная оценка
     await storage_manager.ensure_space_available_async(estimated_size)
 
@@ -216,8 +290,37 @@ async def synthesize(
         if not success or not audio_path.exists():
             raise Exception("Не удалось синтезировать аудио")
 
-        # Планируем автоматическое удаление файла через 10 минут
-        asyncio.create_task(schedule_file_deletion(audio_path, delay_minutes=10))
+        # Загружаем в Google Drive (если доступен)
+        drive_file_id = None
+        if drive_service is not None:
+            try:
+                drive_file_id = drive_service.upload_file(
+                    str(audio_path),
+                    audio_filename
+                )
+
+                if drive_file_id:
+                    # Сохраняем в базу данных
+                    if db_manager is not None:
+                        text_preview = text[:200] if len(text) > 200 else text
+                        db_manager.add_audio_record(
+                            user_id=user_id,
+                            file_id=file_id,
+                            drive_file_id=drive_file_id,
+                            file_name=audio_filename,
+                            text_preview=text_preview,
+                            voice=TTS_VOICE,
+                            rate=rate
+                        )
+
+                    # Удаляем локальный файл после успешной загрузки
+                    audio_path.unlink()
+                    print(f"[Synthesize] Uploaded to Drive and removed local file: {audio_filename}")
+
+            except Exception as e:
+                print(f"[Synthesize] Warning: Could not upload to Drive: {e}")
+                # Если не удалось загрузить в Drive, файл остается локально
+                # и будет удален через StorageManager
 
     except Exception as e:
         # Удаляем файл, если он был создан
@@ -229,12 +332,14 @@ async def synthesize(
     return {
         "status": "success",
         "file_id": file_id,
-        "message": "Аудио успешно синтезировано"
+        "message": "Аудио успешно синтезировано",
+        "stored_in_drive": drive_file_id is not None
     }
 
 
 @app.post("/synthesize_document")
 async def synthesize_document(
+    request: Request,
     file: UploadFile = File(...),
     rate: str = Form(DEFAULT_RATE)
 ):
@@ -242,6 +347,9 @@ async def synthesize_document(
     Эндпоинт для синтеза речи из загруженного документа.
     Принимает файл и параметр скорости, возвращает путь к аудиофайлу.
     """
+
+    # Получаем user_id
+    user_id = get_user_id_from_request(request)
 
     # Читаем содержимое файла
     file_content = await file.read()
@@ -306,14 +414,42 @@ async def synthesize_document(
         if not success or not audio_path.exists():
             raise Exception("Не удалось синтезировать аудио")
 
-        # Планируем автоматическое удаление файла через 10 минут
-        asyncio.create_task(schedule_file_deletion(audio_path, delay_minutes=10))
+        # Загружаем в Google Drive (если доступен)
+        drive_file_id = None
+        if drive_service is not None:
+            try:
+                drive_file_id = drive_service.upload_file(
+                    str(audio_path),
+                    audio_filename
+                )
+
+                if drive_file_id:
+                    # Сохраняем в базу данных
+                    if db_manager is not None:
+                        text_preview = text[:200] if len(text) > 200 else text
+                        db_manager.add_audio_record(
+                            user_id=user_id,
+                            file_id=audio_file_id,
+                            drive_file_id=drive_file_id,
+                            file_name=audio_filename,
+                            text_preview=text_preview,
+                            voice=TTS_VOICE,
+                            rate=rate
+                        )
+
+                    # Удаляем локальный файл после успешной загрузки
+                    audio_path.unlink()
+                    print(f"[SynthesizeDoc] Uploaded to Drive and removed local file: {audio_filename}")
+
+            except Exception as e:
+                print(f"[SynthesizeDoc] Warning: Could not upload to Drive: {e}")
 
         # Возвращаем ID файла
         return {
             "status": "success",
             "file_id": audio_file_id,
-            "message": "Документ успешно озвучен"
+            "message": "Документ успешно озвучен",
+            "stored_in_drive": drive_file_id is not None
         }
 
     except HTTPException:
@@ -326,26 +462,113 @@ async def synthesize_document(
 
 
 @app.get("/audio/{file_id}")
-async def get_audio(file_id: str):
+async def get_audio(request: Request, file_id: str):
     """
     Эндпоинт для получения аудиофайла.
+    Проверяет владельца файла и срок давности.
     """
+    # Получаем user_id
+    user_id = get_user_id_from_request(request)
+
     # Проверяем, что file_id это UUID (безопасность)
     try:
         uuid.UUID(file_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Некорректный ID файла")
 
+    # Сначала проверяем локальный файл (fallback для старых файлов)
     audio_path = AUDIO_DIR / f"{file_id}.mp3"
 
-    if not audio_path.exists():
+    if audio_path.exists():
+        return FileResponse(
+            path=str(audio_path),
+            media_type='audio/mpeg',
+            filename='audio.mp3'
+        )
+
+    # Если локального файла нет, пробуем получить из Google Drive
+    if db_manager is None or drive_service is None:
         raise HTTPException(status_code=404, detail="Файл не найден")
 
-    return FileResponse(
-        path=str(audio_path),
-        media_type='audio/mpeg',
-        filename='audio.mp3'
-    )
+    # Получаем запись из БД
+    record = db_manager.get_record_by_file_id(file_id)
+
+    if record is None:
+        raise HTTPException(status_code=404, detail="Файл не найден")
+
+    # Проверяем владельца
+    if record.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+
+    # Проверяем срок давности (7 дней)
+    from google_drive.config import FILE_RETENTION_DAYS
+    from datetime import datetime, timedelta
+
+    age = datetime.utcnow() - record.created_at
+    if age > timedelta(days=FILE_RETENTION_DAYS):
+        raise HTTPException(status_code=410, detail="Файл устарел и был удален")
+
+    # Получаем файл из Google Drive
+    try:
+        file_content = drive_service.get_file_content(record.drive_file_id)
+
+        if file_content is None:
+            raise HTTPException(status_code=404, detail="Файл не найден в хранилище")
+
+        # Возвращаем файл из памяти
+        from fastapi.responses import Response
+
+        return Response(
+            content=file_content,
+            media_type='audio/mpeg',
+            headers={
+                'Content-Disposition': f'inline; filename="{record.file_name}"'
+            }
+        )
+
+    except Exception as e:
+        print(f"[GetAudio] Error retrieving file from Drive: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка при получении файла")
+
+
+@app.get("/history")
+async def get_history(request: Request, limit: int = 50, offset: int = 0):
+    """
+    Получить историю озвучек для текущего пользователя.
+
+    Args:
+        limit: Максимальное количество записей (по умолчанию 50)
+        offset: Смещение для пагинации (по умолчанию 0)
+
+    Returns:
+        JSON с историей озвучек
+    """
+    # Получаем user_id
+    user_id = get_user_id_from_request(request)
+
+    if db_manager is None:
+        return {
+            "status": "error",
+            "message": "История недоступна",
+            "history": []
+        }
+
+    try:
+        # Получаем историю из БД
+        records = db_manager.get_user_history(user_id, limit=limit, offset=offset)
+
+        # Конвертируем в JSON
+        history = [record.to_dict() for record in records]
+
+        return {
+            "status": "success",
+            "total": len(history),
+            "history": history
+        }
+
+    except Exception as e:
+        print(f"[History] Error retrieving history: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка при получении истории")
 
 
 @app.get("/stats")

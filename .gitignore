@@ -56,6 +56,11 @@ web_tts/audio/
 .env.local
 .env.*.local
 
+# Google Drive OAuth credentials and tokens
+credentials.json
+token.json
+token.pickle
+
 # Temporary files
 temp/
 tmp/

@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
-from .models import Base, AudioHistory
+from models import Base, AudioHistory
 
 # Database configuration
 BASE_DIR = Path(__file__).parent

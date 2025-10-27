@@ -385,6 +385,86 @@
             margin-bottom: 10px;
             word-break: break-word;
         }
+
+        /* История озвучек */
+        .history-header h2 {
+            color: var(--header-color);
+            font-size: 22px;
+            margin-bottom: 5px;
+        }
+
+        .history-list {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .history-item {
+            background-color: var(--progress-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 15px;
+            transition: all 0.2s;
+        }
+
+        .history-item:hover {
+            border-color: var(--button-bg);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+        }
+
+        .history-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .history-item-date {
+            font-size: 12px;
+            color: #888;
+        }
+
+        .history-item-text {
+            font-size: 14px;
+            color: var(--text-color);
+            margin-bottom: 10px;
+            line-height: 1.5;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+        }
+
+        .history-item-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .history-item-actions audio {
+            flex: 1;
+            height: 35px;
+        }
+
+        .history-item-download {
+            padding: 8px 16px;
+            background-color: var(--button-bg);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            transition: background-color 0.2s;
+        }
+
+        .history-item-download:hover {
+            background-color: var(--button-hover);
+        }
     </style>
 </head>
 <body>
@@ -397,6 +477,7 @@
             <div class="mode-selector">
                 <button type="button" class="mode-btn active" id="text-mode-btn">📝 Текст</button>
                 <button type="button" class="mode-btn" id="document-mode-btn">📄 Документ</button>
+                <button type="button" class="mode-btn" id="history-mode-btn">📚 История</button>
             </div>
 
             <!-- Форма для текста -->
@@ -520,6 +601,24 @@
                 </div>
             </form>
 
+            <!-- История озвучек -->
+            <div id="history-section" style="display: none;">
+                <div class="history-header">
+                    <h2>📚 История озвучек</h2>
+                    <p class="subtitle">Файлы хранятся 7 дней</p>
+                </div>
+
+                <div id="history-loading" style="display: none; text-align: center; padding: 20px;">
+                    <p>Загрузка истории...</p>
+                </div>
+
+                <div id="history-empty" style="display: none; text-align: center; padding: 40px;">
+                    <p style="color: #888;">История пуста. Создайте первую озвучку!</p>
+                </div>
+
+                <div id="history-list" class="history-list"></div>
+            </div>
+
             <div class="stats">
                 💾 Хранилище: {{ "%.1f"|format(storage_stats.total_size_mb) }} MB / {{ "%.0f"|format(storage_stats.max_size_mb) }} MB
                 ({{ "%.1f"|format(storage_stats.used_percent) }}% заполнено)
@@ -531,21 +630,37 @@
         // ===== ПЕРЕКЛЮЧЕНИЕ РЕЖИМОВ =====
         const textModeBtn = document.getElementById('text-mode-btn');
         const documentModeBtn = document.getElementById('document-mode-btn');
+        const historyModeBtn = document.getElementById('history-mode-btn');
         const ttsForm = document.getElementById('tts-form');
         const documentForm = document.getElementById('document-form');
+        const historySection = document.getElementById('history-section');
 
         textModeBtn.addEventListener('click', () => {
             textModeBtn.classList.add('active');
             documentModeBtn.classList.remove('active');
+            historyModeBtn.classList.remove('active');
             ttsForm.style.display = 'block';
             documentForm.style.display = 'none';
+            historySection.style.display = 'none';
         });
 
         documentModeBtn.addEventListener('click', () => {
             documentModeBtn.classList.add('active');
             textModeBtn.classList.remove('active');
+            historyModeBtn.classList.remove('active');
             documentForm.style.display = 'block';
             ttsForm.style.display = 'none';
+            historySection.style.display = 'none';
+        });
+
+        historyModeBtn.addEventListener('click', () => {
+            historyModeBtn.classList.add('active');
+            textModeBtn.classList.remove('active');
+            documentModeBtn.classList.remove('active');
+            historySection.style.display = 'block';
+            ttsForm.style.display = 'none';
+            documentForm.style.display = 'none';
+            loadHistory();
         });
 
         // ===== ТЕКСТОВЫЙ РЕЖИМ =====
@@ -767,6 +882,83 @@
             messageDoc.textContent = text;
             messageDoc.className = 'message ' + type;
             messageDoc.style.display = 'block';
+        }
+
+        // ===== ИСТОРИЯ ОЗВУЧЕК =====
+        const historyLoading = document.getElementById('history-loading');
+        const historyEmpty = document.getElementById('history-empty');
+        const historyList = document.getElementById('history-list');
+
+        async function loadHistory() {
+            // Показываем индикатор загрузки
+            historyLoading.style.display = 'block';
+            historyEmpty.style.display = 'none';
+            historyList.innerHTML = '';
+
+            try {
+                const response = await fetch('/history?limit=50');
+                const data = await response.json();
+
+                historyLoading.style.display = 'none';
+
+                if (!response.ok) {
+                    throw new Error(data.message || 'Ошибка загрузки истории');
+                }
+
+                if (data.history.length === 0) {
+                    historyEmpty.style.display = 'block';
+                    return;
+                }
+
+                // Отображаем историю
+                data.history.forEach(item => {
+                    const historyItem = createHistoryItem(item);
+                    historyList.appendChild(historyItem);
+                });
+
+            } catch (error) {
+                historyLoading.style.display = 'none';
+                historyEmpty.style.display = 'block';
+                historyEmpty.innerHTML = `<p style="color: var(--error-color);">Ошибка: ${error.message}</p>`;
+            }
+        }
+
+        function createHistoryItem(item) {
+            const div = document.createElement('div');
+            div.className = 'history-item';
+
+            // Форматируем дату
+            const date = new Date(item.created_at);
+            const formattedDate = date.toLocaleString('ru-RU', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+
+            // Форматируем preview текста
+            const textPreview = item.text_preview || 'Без текста';
+
+            // Создаем HTML
+            div.innerHTML = `
+                <div class="history-item-header">
+                    <span class="history-item-date">${formattedDate}</span>
+                    <span style="font-size: 12px; color: #888;">${item.rate || '+50%'}</span>
+                </div>
+                <div class="history-item-text">${textPreview}</div>
+                <div class="history-item-actions">
+                    <audio controls preload="metadata">
+                        <source src="/audio/${item.file_id}" type="audio/mpeg">
+                        Ваш браузер не поддерживает аудио элемент.
+                    </audio>
+                    <a href="/audio/${item.file_id}" download="${item.file_name}" class="history-item-download">
+                        💾 Скачать
+                    </a>
+                </div>
+            `;
+
+            return div;
         }
     </script>
 </body>

@@ -56,6 +56,11 @@ web_tts/audio/
 .env.example.override
 .env.*.local
 
+# Google Drive OAuth credentials and tokens
+credentials.json
+token.json
+token.pickle
+
 # Temporary files
 temp/
 tmp/

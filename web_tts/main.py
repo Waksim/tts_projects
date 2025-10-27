@@ -25,6 +25,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # Загружаем переменные окружения из .env файла
 load_dotenv()
 
+# IMPORTANT: Force default event loop policy to avoid uvloop conflicts with edge-tts
+# uvloop causes aiohttp ClientSession in edge-tts to hang indefinitely
+asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
+
 from tts_common import synthesize_text, StorageManager, parse_document
 from tts_common.document_parser import SUPPORTED_EXTENSIONS
 

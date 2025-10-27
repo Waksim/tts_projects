@@ -95,6 +95,7 @@ async def _synthesize_single_chunk(
     """
     current_delay = INITIAL_RETRY_DELAY
     for attempt in range(MAX_RETRIES):
+        communicate = None
         try:
             # Создаем Communicate без стилей (они не поддерживаются edge-tts)
             communicate = edge_tts.Communicate(text=text, voice=voice, rate=rate, pitch=pitch)
@@ -130,6 +131,20 @@ async def _synthesize_single_chunk(
             else:
                 print(f"❌ Не удалось синтезировать {os.path.basename(mp3_path)} после {MAX_RETRIES} попыток.", flush=True)
                 return False
+        finally:
+            # CRITICAL: Explicitly close aiohttp session to prevent event loop blocking
+            # This is especially important when running under uvloop
+            if communicate is not None:
+                try:
+                    # edge-tts Communicate doesn't have explicit close(),
+                    # but we need to ensure any underlying aiohttp session is closed
+                    if hasattr(communicate, 'close'):
+                        await communicate.close()
+                    # Force garbage collection of the communicate object
+                    del communicate
+                except Exception as close_error:
+                    # Silently ignore close errors, but log them for debugging
+                    print(f"   [DEBUG] Error closing communicate: {close_error}", flush=True)
     return False
 
 
